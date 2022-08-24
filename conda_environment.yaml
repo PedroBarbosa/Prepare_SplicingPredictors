@@ -1,0 +1,13 @@
+name: prepareSplicingTools
+channels:
+  - bioconda
+  - conda-forge
+  - anaconda 
+dependencies:
+  - python>=3.8
+  - pip>=22
+  - bcftools=1.15
+  - pyfaidx=0.7.1
+  - cyvcf2=0.30.16
+  - pip:
+     - hgvs=1.5.2
