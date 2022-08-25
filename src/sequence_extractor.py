@@ -1,18 +1,37 @@
-from operator import is_
-from pickletools import read_uint1
 import sys
+from turtle import pos
 from vcf_utils import *
 import cyvcf2
 import hgvs.parser
 from Bio.Seq import Seq
 from pyfaidx import Fasta
 import argparse
-from curses import KEY_SAVE
-from typing import Union, TextIO, Optional
-import pathlib
 import logging
-from numpy import rec
-logging.basicConfig(stream=sys.stdout, level=logging.INFO, format='%(asctime)s %(message)s')
+logging.basicConfig(stream=sys.stdout, level=logging.INFO,
+                    format='%(asctime)s %(message)s')
+
+
+def _no_ss(id, seq_wt, seq_mut, ss, tool):
+    """
+    Models that test the value at each position (such as in SpliceAI),
+    don't require specific ss motif at the 4-mer (e.g. Spliceator). 
+    """
+    if ss == "donor":
+        _ss = "GT"
+    else:
+        _ss = "AG"
+
+    if all(_ss not in x for x in [seq_wt, seq_mut]):
+        if tool in ["Splice2Deep", "DSSP"]:
+            logging.info('[{} {}] Variant {} discarded. Reason: no {} dinucleotide formed at the 4-mer around the mutation (wt={}, mut={}).'.format(
+                tool, ss, id, _ss, seq_wt, seq_mut))
+            return True
+        elif tool in ["Spliceator", "SpliceRover"]:
+            logging.info('[{} {}] Warning variant {}: No {} dinucleotide formed at the 4-mer around the mutation (wt={}, mut={}).'.format(
+                tool, ss, id, _ss, seq_wt, seq_mut))
+            return False
+    else:
+        return False
 
 
 def _dict_to_fasta(d: dict, outfile: str):
@@ -34,23 +53,29 @@ class DataProcessing(object):
                  vep_tag: str,
                  fasta: Fasta,
                  outbasename: str,
+                 ss: str = None,
                  svm_bp_finder: bool = False,
-                 splice2deep_donor: bool = False,
-                 splice2deep_acceptor: bool = False):
+                 spliceator: bool = False,
+                 splice2deep: bool = False,
+                 splicerover: bool = False,
+                 dssp: bool = False):
 
         self.hp = hgvs.parser.Parser()
         self.vep_tag = vep_tag
         self.vep_indexes = vep_indexes
         self.fasta = Fasta(fasta)
         self.outbasename = outbasename
+        self.ss = ss
         self.svm_bp_finder = svm_bp_finder
-        self.splice2deep_donor = splice2deep_donor
-        self.splice2deep_acceptor = splice2deep_acceptor
+        self.spliceator = spliceator
+        self.splice2deep = splice2deep
+        self.dssp = dssp
+        self.splicerover = splicerover
         self._iterate_vcf(vcf)
 
     def _iterate_vcf(self, vcf):
 
-        fasta_svm_bp, fasta_splice2deep_donor, fasta_splice2deep_acceptor = {}, {}, {}
+        fasta_svm_bp, fasta_spliceator, fasta_splice2deep, fasta_dssp, fasta_splicerover = {}, {}, {}, {}, {}
 
         for record in VCF(vcf):
 
@@ -70,49 +95,161 @@ class DataProcessing(object):
                                                   vep_annotation,
                                                   out_dict=fasta_svm_bp)
 
-            if self.splice2deep_donor:
-                fasta_splice2deep_donor = self.Splice2Deep(record,
-                                                           vep_annotation,
-                                                           out_dict=fasta_splice2deep_donor,
-                                                           is_donor=True)
-            if self.splice2deep_acceptor:
-                fasta_splice2deep_acceptor = self.Splice2Deep(record,
-                                                              vep_annotation,
-                                                              out_dict=fasta_splice2deep_acceptor,
-                                                              is_donor=False)
+            if self.spliceator:
+                fasta_spliceator = self.Spliceator(record,
+                                                   vep_annotation,
+                                                   out_dict=fasta_spliceator)
 
+            if self.splice2deep:
+                fasta_splice2deep = self.Splice2Deep(record,
+                                                     vep_annotation,
+                                                     out_dict=fasta_splice2deep)
+
+            if self.dssp:
+                fasta_dssp = self.DSSP(
+                    record, vep_annotation, out_dict=fasta_dssp)
+
+            if self.splicerover:
+                fasta_splicerover = self.SpliceRover(record, vep_annotation, out_dict=fasta_splicerover)
+        
+        ###################
+        ## WRITE OUTPUT  ##
+        ###################
         if self.svm_bp_finder:
             _dict_to_fasta(
                 fasta_svm_bp, '{}_SVM_BP_finder.fa'.format(self.outbasename))
 
-        if self.splice2deep_donor:
-            _dict_to_fasta(
-                fasta_splice2deep_donor, '{}_Splice2Deep_donor.fa'.format(self.outbasename))
-        
-        if self.splice2deep_acceptor:
-            _dict_to_fasta(
-                fasta_splice2deep_acceptor, '{}_Splice2Deep_acceptor.fa'.format(self.outbasename))
-            
-    def Splice2Deep(self,
-                    record: cyvcf2.Variant,
-                    vep_annotation: str,
-                    out_dict: dict,
-                    is_donor: bool):
+        if self.spliceator:
+            _dict_to_fasta(fasta_spliceator, '{}_Spliceator_{}.fa'.format(
+                self.outbasename, self.ss))
 
-        def _no_donor(seq_wt, seq_mut):
-            if all("GT" not in x for x in [seq_wt, seq_mut]):
-                logging.info('[Splice2Deep donor] Variant {} discarded. Reason: no GT dinucleotide formed at the 4-mer around the mutation (wt={}, mut={}).'.format(id, seq_wt, seq_mut))    
-                return True
-            else:
-                return False
+        if self.splice2deep:
+            _dict_to_fasta(
+                fasta_splice2deep, '{}_Splice2Deep_{}.fa'.format(self.outbasename, self.ss))
 
-        def _no_acceptor(seq_wt, seq_mut):
-            if all("AG" not in x for x in [seq_wt, seq_mut]):
-                logging.info('[Splice2Deep acceptor] Variant {} discarded. Reason: no AG dinucleotide formed at the 4-mer around the mutation (wt={}, mut={}).'.format(id, seq_wt, seq_mut))    
-                return True
-            else:
-                return False
-            
+        if self.dssp:
+            _dict_to_fasta(
+                fasta_dssp, '{}_DSSP_{}.fa'.format(self.outbasename, self.ss))
+
+        if self.splicerover:
+            _dict_to_fasta(fasta_splicerover, '{}_SpliceRover_{}.fa'.format(self.outbasename, self.ss))
+    
+    def SpliceRover(self,
+                   record: cyvcf2.Variant,
+                   vep_annotation: str,
+                   out_dict: dict):
+        """
+        400bp sequences will be generated with the putative
+        splice sites around the middle positions (201,202)
+        """
+        assert self.ss in [
+            'donor', 'acceptor'], "--splicerover requires --splice_site to be set (donor or acceptor)"
+        id = record.CHROM + "_" + \
+            str(record.POS) + "_" + record.REF + "_" + record.ALT[0]
+        header_wt = id + "_WT"
+        header_mut = id + "_Mutated"
+        strand = vep_annotation.split("|")[self.vep_indexes['strand']]
+
+        if record.var_type in ['snp']:
+            if strand == "1":
+                seq_wt = str(self.fasta[record.CHROM]
+                             [record.POS - 3:record.POS + 1])
+                seq_mut = seq_wt[:2] + record.ALT[0] + seq_wt[-1]
+
+                if _no_ss(id, seq_wt, seq_mut, self.ss, 'SpliceRover'):
+                    return out_dict
+
+                seq_wt = str(self.fasta[record.CHROM]
+                             [record.POS - 200:record.POS + 200])
+                seq_mut = seq_wt[:199] + record.ALT[0] + seq_wt[200:]
+
+            elif strand == "-1":
+                # Just to check motif presence
+                seq_wt = str(-self.fasta[record.CHROM]
+                             [record.POS - 2:record.POS + 2])
+                seq_mut = seq_wt[:2] + \
+                    Seq(record.ALT[0]).reverse_complement() + seq_wt[-1]
+
+                if _no_ss(id, seq_wt, seq_mut, self.ss, 'SpliceRover'):
+                    return out_dict
+
+                seq_wt = str(-self.fasta[record.CHROM]
+                             [record.POS - 200:record.POS + 200])
+                seq_mut = seq_wt[:199] + \
+                    str(Seq(record.ALT[0]).complement()) + seq_wt[200:]
+
+            out_dict[header_wt] = seq_wt
+            out_dict[header_mut] = seq_mut
+
+        else:
+            logging.info(
+                "[SpliceRover {}] Variant {} discarded. Reason: There is only support for SNVs".format(self.ss, id))
+        return out_dict
+    
+    def Spliceator(self,
+                   record: cyvcf2.Variant,
+                   vep_annotation: str,
+                   out_dict: dict):
+        """
+        200bp sequences will be generated with the putative
+        splice sites around the middle positions (101,102).
+        """
+
+        assert self.ss in [
+            'donor', 'acceptor'], "--spliceator requires --splice_site to be set (donor or acceptor)"
+        id = record.CHROM + "_" + \
+            str(record.POS) + "_" + record.REF + "_" + record.ALT[0]
+        header_wt = id + "_WT"
+        header_mut = id + "_Mutated"
+        strand = vep_annotation.split("|")[self.vep_indexes['strand']]
+
+        if record.var_type in ['snp']:
+            if strand == "1":
+                seq_wt = str(self.fasta[record.CHROM]
+                             [record.POS - 3:record.POS + 1])
+                seq_mut = seq_wt[:2] + record.ALT[0] + seq_wt[-1]
+
+                if _no_ss(id, seq_wt, seq_mut, self.ss, 'Spliceator'):
+                    return out_dict
+
+                seq_wt = str(self.fasta[record.CHROM]
+                             [record.POS - 100:record.POS + 100])
+                seq_mut = seq_wt[:99] + record.ALT[0] + seq_wt[100:]
+
+            elif strand == "-1":
+                # Just to check motif presence
+                seq_wt = str(-self.fasta[record.CHROM]
+                             [record.POS - 2:record.POS + 2])
+                seq_mut = seq_wt[:2] + \
+                    Seq(record.ALT[0]).reverse_complement() + seq_wt[-1]
+
+                if _no_ss(id, seq_wt, seq_mut, self.ss, 'Spliceator'):
+                    return out_dict
+  
+                seq_wt = str(-self.fasta[record.CHROM]
+                             [record.POS - 100:record.POS + 100])
+                seq_mut = seq_wt[:99] + \
+                    str(Seq(record.ALT[0]).complement()) + seq_wt[100:]
+
+            out_dict[header_wt] = seq_wt
+            out_dict[header_mut] = seq_mut
+
+        else:
+            logging.info(
+                "[Spliceator {}] Variant {} discarded. Reason: There is only support for SNVs".format(self.ss, id))
+        return out_dict
+
+    def DSSP(self,
+             record: cyvcf2.Variant,
+             vep_annotation: str,
+             out_dict: dict):
+        """
+        140bp sequences will be generated with the 
+        putative splice sites at position 69/70 (for acceptors)
+        and 71/72 (for donors)
+        """
+        assert self.ss in [
+            'donor', 'acceptor'], "--dssp requires --splice_site to be set (donor or acceptor)"
         id = record.CHROM + "_" + \
             str(record.POS) + "_" + record.REF + "_" + record.ALT[0]
         header_wt = id + "_WT"
@@ -121,60 +258,146 @@ class DataProcessing(object):
         hgvs = vep_annotation.split("|")[self.vep_indexes['hgvsc']]
         
         if record.var_type in ['snp']:
-            if strand == "1":
-                seq_wt = str(self.fasta[record.CHROM][record.POS - 3:record.POS + 1])
-                seq_mut = seq_wt[:2] + record.ALT[0] + seq_wt[-1]
-                
-                if is_donor:
-                    if _no_donor(seq_wt, seq_mut):
-                        return out_dict
-                    ss="GT"
-                else:
-                    if _no_acceptor(seq_wt, seq_mut):
-                        return out_dict
-                    ss="AG"
+            
+            if self.ss == "donor":
+                ss = "GT"
+                pos_in_seq_bef=71
+                pos_in_seq_after=69
+            elif self.ss == "acceptor":
+                ss = "AG"
+                pos_in_seq_bef=69
+                pos_in_seq_after=71
                     
-                index = seq_mut.index(ss) if ss in seq_mut else seq_wt.index(ss)
+            if strand == "1":
+                seq_wt = str(self.fasta[record.CHROM]
+                             [record.POS - 3:record.POS + 1])
+                seq_mut = seq_wt[:2] + record.ALT[0] + seq_wt[-1]
+
+                if _no_ss(id, seq_wt, seq_mut, self.ss, 'DSSP'):
+                    return out_dict
+           
+                index = seq_mut.index(
+                    ss) if ss in seq_mut else seq_wt.index(ss)
+                d = {0: 2, 1: 1, 2: 0}
+
+                ss_pos = record.POS - d[index]
+                mut_pos = pos_in_seq_bef + d[index]
+       
+                seq = str(self.fasta[record.CHROM]
+                          [ss_pos - pos_in_seq_bef:ss_pos + pos_in_seq_after])
+                mut_seq = seq[:mut_pos - 1] + record.ALT[0] + seq[mut_pos:]
+
+            elif strand == "-1":
+                seq_wt = str(-self.fasta[record.CHROM]
+                             [record.POS - 2:record.POS + 2])
+                seq_mut = seq_wt[:2] + \
+                    Seq(record.ALT[0]).reverse_complement() + seq_wt[-1]
+
+                if _no_ss(id, seq_wt, seq_mut, self.ss, 'DSSP'):
+                    return out_dict
+
+                index = seq_mut.index(
+                    ss) if ss in seq_mut else seq_wt.index(ss)
+                d = {0: 1, 1: 0, 2: -1}
+                ss_pos = record.POS + d[index]
+                mut_pos = pos_in_seq_bef + d[index]
+                seq = str(-self.fasta[record.CHROM]
+                          [ss_pos - pos_in_seq_after:ss_pos + pos_in_seq_bef])
+                
+                mut_seq = seq[:mut_pos] + \
+                    str(Seq(record.ALT[0]).complement()) + seq[mut_pos + 1:]
+                    
+            if self.ss == "donor":
+                assert any(x[70:72] for x in [seq, mut_seq]), "Positions 71 and 72 should contain GT"
+            else:
+                assert any(x[68:70] for x in [seq, mut_seq]), "Positions 69 and 70 should contain AG"
+
+            out_dict[header_wt] = seq
+            out_dict[header_mut] = mut_seq
+
+        else:
+            logging.info(
+                "[Splice2Deep {}] Variant {} discarded. Reason: There is only support for SNVs".format(self.ss, id))
+        return out_dict
+    
+    def Splice2Deep(self,
+                    record: cyvcf2.Variant,
+                    vep_annotation: str,
+                    out_dict: dict):
+
+        assert self.ss in [
+            'donor', 'acceptor'], "--splice2deep requires --ss to be set (donor or acceptor)"
+
+        id = record.CHROM + "_" + \
+            str(record.POS) + "_" + record.REF + "_" + record.ALT[0]
+        header_wt = id + "_WT"
+        header_mut = id + "_Mutated"
+        strand = vep_annotation.split("|")[self.vep_indexes['strand']]
+        hgvs = vep_annotation.split("|")[self.vep_indexes['hgvsc']]
+
+        if record.var_type in ['snp']:
+            if strand == "1":
+                seq_wt = str(self.fasta[record.CHROM]
+                             [record.POS - 3:record.POS + 1])
+                seq_mut = seq_wt[:2] + record.ALT[0] + seq_wt[-1]
+
+                if _no_ss(id, seq_wt, seq_mut, self.ss, 'Splice2Deep'):
+                    return out_dict
+
+                if self.ss == "donor":
+                    ss = "GT"
+                elif self.ss == "acceptor":
+                    ss = "AG"
+
+                index = seq_mut.index(
+                    ss) if ss in seq_mut else seq_wt.index(ss)
                 d = {0: 2, 1: 1, 2: 0}
 
                 ss_pos = record.POS - d[index]
                 mut_pos = 300 + d[index]
 
-                seq = str(self.fasta[record.CHROM][ss_pos -1 -300:ss_pos + 1 + 300])
+                seq = str(self.fasta[record.CHROM]
+                          [ss_pos - 1 - 300:ss_pos + 1 + 300])
                 mut_seq = seq[:mut_pos] + record.ALT[0] + seq[mut_pos + 1:]
-       
-            elif strand == "-1":
-                seq_wt = str(-self.fasta[record.CHROM][record.POS -2:record.POS + 2])
-                seq_mut = seq_wt[:2] + Seq(record.ALT[0]).reverse_complement() + seq_wt[-1]
 
-                if is_donor:
-                    if _no_donor(seq_wt, seq_mut):
-                        return out_dict
-                    ss="GT"
-                else:
-                    if _no_acceptor(seq_wt, seq_mut):
-                        return out_dict
-                    ss="AG"
-                    
+            elif strand == "-1":
+                seq_wt = str(-self.fasta[record.CHROM]
+                             [record.POS - 2:record.POS + 2])
+                seq_mut = seq_wt[:2] + \
+                    Seq(record.ALT[0]).reverse_complement() + seq_wt[-1]
+
+                if _no_ss(id, seq_wt, seq_mut, self.ss, 'Splice2Deep'):
+                    return out_dict
+
+                if self.ss == "donor":
+                    ss = "GT"
+                elif self.ss == "acceptor":
+                    ss = "AG"
+
                 # # index = 0: mutation is at the pos + 3 in the intron
-                # # index = 1: mutation triggers the creation/lost of the T 
+                # # index = 1: mutation triggers the creation/lost of the T
                 # # index = 2: mutation triggers the creation/lost of the G
-                index = seq_mut.index(ss) if ss in seq_mut else seq_wt.index(ss)
+                index = seq_mut.index(
+                    ss) if ss in seq_mut else seq_wt.index(ss)
                 d = {0: 1, 1: 0, 2: -1}
                 ss_pos = record.POS + d[index]
                 mut_pos = 301 + d[index]
-                seq = str(-self.fasta[record.CHROM][ss_pos -1 -300:ss_pos + 1 + 300])
-                mut_seq = seq[:mut_pos] + str(Seq(record.ALT[0]).complement()) + seq[mut_pos + 1:]
+                seq = str(-self.fasta[record.CHROM]
+                          [ss_pos - 1 - 300:ss_pos + 1 + 300])
+                mut_seq = seq[:mut_pos] + \
+                    str(Seq(record.ALT[0]).complement()) + seq[mut_pos + 1:]
 
-            ss = "GT" if is_donor else "AG"
-            assert any(x[300:302] == ss for x in [seq, mut_seq]), "Positions 301 and 302 should be {}".format(ss)
+            ss = "GT" if self.ss == "donor" else "AG"
+            assert any(x[300:302] == ss for x in [seq, mut_seq]
+                       ), "Positions 301 and 302 should be {}".format(ss)
             out_dict[header_wt] = seq
             out_dict[header_mut] = mut_seq
-           
+
         else:
-            logging.info("[Splice2Deep {}] Variant {} discarded. Reason: There is only support for SNVs".format('donor' if is_donor else 'acceptor', id))
+            logging.info(
+                "[Splice2Deep {}] Variant {} discarded. Reason: There is only support for SNVs".format(self.ss, id))
         return out_dict
-     
+
     def SVM_BP_finder(self,
                       record: cyvcf2.Variant,
                       vep_annotation: str,
@@ -285,15 +508,22 @@ def main():
         dest='fasta', help='Reference genome in fasta format. Should be the same genome assembly as the variants represented in the vcf')
     parser.add_argument(dest='outbasename',
                         help='Outbasename to write the output')
-
+    parser.add_argument('--ss', type=str, choices=('donor', 'acceptor'),
+                        help='For splice site prediction tools, refer to which splice site type VCF refers to')
     parser.add_argument('--vep_tag', default='CSQ', choices=[
                         'ANN', 'CSQ'], help='Field in VCF where VEP annotations are stored. Default: "CSQ".')
     parser.add_argument('--svm_bp_finder', action='store_true',
                         help='Generate input for SVM-BP finder tool. Only sequences that refer to the end of introns will be written')
-    parser.add_argument('--splice2deep_donor', action='store_true',
-                        help='Generate input for Splice2Deep donor model (602bp sequences). Putative splice site positions should be in positions 300 and 301.')
-    parser.add_argument('--splice2deep_acceptor', action='store_true',
-                        help='Generate input for Splice2Deep acceptor model (602bp sequences). Putative splice site positions should be in positions 300 and 301.')
+    parser.add_argument('--splice2deep', action='store_true',
+                        help='Generate input for Splice2Deep donor model (602bp sequences). Putative splice site positions need to be in positions 300 and 301.')
+    parser.add_argument('--spliceator', action='store_true',
+                        help='Generate input for Spliceator acceptor model (200bp sequences). Putative splice site positions will be around positions 100 and 101.')
+    parser.add_argument('--dssp', action='store_true',
+                        help='Generate input for DSSP model (140bp sequences). Putative splice site positions need be in positions 69 and 70 (for acceptors) and 71 and 72 (for donors).')
+    parser.add_argument('--splicerover', action='store_true',
+                        help='Generate input for SpliceRover model (400bp sequences). Putative splice site positions will be around positions 200 and 201.')
+    
+    
     args = parser.parse_args()
 
     # Initial checks
@@ -305,9 +535,12 @@ def main():
                         args.vep_tag,
                         fasta=args.fasta,
                         outbasename=args.outbasename,
+                        ss=args.ss,
                         svm_bp_finder=args.svm_bp_finder,
-                        splice2deep_donor=args.splice2deep_donor,
-                        splice2deep_acceptor=args.splice2deep_acceptor)
+                        splice2deep=args.splice2deep,
+                        spliceator=args.spliceator,
+                        dssp=args.dssp,
+                        splicerover=args.splicerover)
 
 
 if __name__ == '__main__':

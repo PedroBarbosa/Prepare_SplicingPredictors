@@ -9,5 +9,6 @@ dependencies:
   - bcftools=1.15
   - pyfaidx=0.7.1
   - cyvcf2=0.30.16
+  - pandas
   - pip:
      - hgvs=1.5.2
