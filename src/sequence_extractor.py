@@ -1,5 +1,7 @@
 import sys
 from turtle import pos
+
+from numpy import ctypeslib
 from vcf_utils import *
 import cyvcf2
 import hgvs.parser
@@ -58,7 +60,8 @@ class DataProcessing(object):
                  spliceator: bool = False,
                  splice2deep: bool = False,
                  splicerover: bool = False,
-                 dssp: bool = False):
+                 dssp: bool = False,
+                 hexplorer: bool = False):
 
         self.hp = hgvs.parser.Parser()
         self.vep_tag = vep_tag
@@ -71,11 +74,13 @@ class DataProcessing(object):
         self.splice2deep = splice2deep
         self.dssp = dssp
         self.splicerover = splicerover
+        self.hexplorer = hexplorer
         self._iterate_vcf(vcf)
 
     def _iterate_vcf(self, vcf):
 
         fasta_svm_bp, fasta_spliceator, fasta_splice2deep, fasta_dssp, fasta_splicerover = {}, {}, {}, {}, {}
+        hexplorer_mapping, hexplorer_ref, hexplorer_mut = {}, "", ""
 
         for record in VCF(vcf):
 
@@ -110,8 +115,15 @@ class DataProcessing(object):
                     record, vep_annotation, out_dict=fasta_dssp)
 
             if self.splicerover:
-                fasta_splicerover = self.SpliceRover(record, vep_annotation, out_dict=fasta_splicerover)
-        
+                fasta_splicerover = self.SpliceRover(
+                    record, vep_annotation, out_dict=fasta_splicerover)
+
+            if self.hexplorer:
+                hexplorer_mapping, hexplorer_ref, hexplorer_mut = self.HEXplorer(record,
+                                                                                 vep_annotation,
+                                                                                 variant_seq_map=hexplorer_mapping,
+                                                                                 hexplorer_ref_seq=hexplorer_ref,
+                                                                                 hexplorer_mut_seq=hexplorer_mut)
         ###################
         ## WRITE OUTPUT  ##
         ###################
@@ -132,12 +144,64 @@ class DataProcessing(object):
                 fasta_dssp, '{}_DSSP_{}.fa'.format(self.outbasename, self.ss))
 
         if self.splicerover:
-            _dict_to_fasta(fasta_splicerover, '{}_SpliceRover_{}.fa'.format(self.outbasename, self.ss))
+            _dict_to_fasta(fasta_splicerover, '{}_SpliceRover_{}.fa'.format(
+                self.outbasename, self.ss))
+
+        if self.hexplorer:
+            f = open('{}_HEXplorer_map.tsv'.format(self.outbasename), 'w')
+            for v_id, seq_mut_pos in hexplorer_mapping.items():
+                f.write('{}\t{}\n'.format(v_id, seq_mut_pos))
+            f.close()
+            f = open('{}_HEXplorer_input.txt'.format(self.outbasename), 'w')
+            f.write('>seqs_{}\n{}\n{}'.format(
+                self.outbasename, hexplorer_ref, hexplorer_mut))
+            f.close()
+
+    def HEXplorer(self,
+                  record: cyvcf2.Variant,
+                  vep_annotation: str,
+                  variant_seq_map: dict,
+                  hexplorer_ref_seq: str,
+                  hexplorer_mut_seq: str):
+        """
+        121bp sequences will be generated with each
+        variant being located in the middle position (61).
+        """
+        id = record.CHROM + "_" + \
+            str(record.POS) + "_" + record.REF + "_" + record.ALT[0]
+
+        strand = vep_annotation.split("|")[self.vep_indexes['strand']]
+        if record.var_type in ['snp']:
+
+            if strand == "1":
+                seq_wt = str(self.fasta[record.CHROM][record.POS - 61:record.POS + 60])
+                seq_mut = seq_wt[:60] + record.ALT[0] + seq_wt[61:]
+            
+            elif strand == "-1":
+   
+                seq_wt = str(-self.fasta[record.CHROM]
+                             [record.POS - 61:record.POS + 60])
+                seq_mut = seq_wt[:60] + \
+                    str(Seq(record.ALT[0]).complement()) + seq_wt[61:]
+       
+            if len(variant_seq_map) >= 1:
+                variant_seq_map[id] = 121 * len(variant_seq_map) + 121 - 61
+            else:
+                variant_seq_map[id] = 60
     
+            hexplorer_ref_seq += seq_wt            
+            hexplorer_mut_seq += seq_mut
+
+            return variant_seq_map, hexplorer_ref_seq, hexplorer_mut_seq
+    
+        else:
+            logging.info("[HEXplorer] Variant {} discarded. Reason: There is only support for SNVs".format(id))
+            return variant_seq_map, hexplorer_ref_seq, hexplorer_mut_seq
+        
     def SpliceRover(self,
-                   record: cyvcf2.Variant,
-                   vep_annotation: str,
-                   out_dict: dict):
+                    record: cyvcf2.Variant,
+                    vep_annotation: str,
+                    out_dict: dict):
         """
         400bp sequences will be generated with the putative
         splice sites around the middle positions (201,202)
@@ -185,7 +249,7 @@ class DataProcessing(object):
             logging.info(
                 "[SpliceRover {}] Variant {} discarded. Reason: There is only support for SNVs".format(self.ss, id))
         return out_dict
-    
+
     def Spliceator(self,
                    record: cyvcf2.Variant,
                    vep_annotation: str,
@@ -225,7 +289,7 @@ class DataProcessing(object):
 
                 if _no_ss(id, seq_wt, seq_mut, self.ss, 'Spliceator'):
                     return out_dict
-  
+
                 seq_wt = str(-self.fasta[record.CHROM]
                              [record.POS - 100:record.POS + 100])
                 seq_mut = seq_wt[:99] + \
@@ -256,18 +320,18 @@ class DataProcessing(object):
         header_mut = id + "_Mutated"
         strand = vep_annotation.split("|")[self.vep_indexes['strand']]
         hgvs = vep_annotation.split("|")[self.vep_indexes['hgvsc']]
-        
+
         if record.var_type in ['snp']:
-            
+
             if self.ss == "donor":
                 ss = "GT"
-                pos_in_seq_bef=71
-                pos_in_seq_after=69
+                pos_in_seq_bef = 71
+                pos_in_seq_after = 69
             elif self.ss == "acceptor":
                 ss = "AG"
-                pos_in_seq_bef=69
-                pos_in_seq_after=71
-                    
+                pos_in_seq_bef = 69
+                pos_in_seq_after = 71
+
             if strand == "1":
                 seq_wt = str(self.fasta[record.CHROM]
                              [record.POS - 3:record.POS + 1])
@@ -275,14 +339,14 @@ class DataProcessing(object):
 
                 if _no_ss(id, seq_wt, seq_mut, self.ss, 'DSSP'):
                     return out_dict
-           
+
                 index = seq_mut.index(
                     ss) if ss in seq_mut else seq_wt.index(ss)
                 d = {0: 2, 1: 1, 2: 0}
 
                 ss_pos = record.POS - d[index]
                 mut_pos = pos_in_seq_bef + d[index]
-       
+
                 seq = str(self.fasta[record.CHROM]
                           [ss_pos - pos_in_seq_bef:ss_pos + pos_in_seq_after])
                 mut_seq = seq[:mut_pos - 1] + record.ALT[0] + seq[mut_pos:]
@@ -303,14 +367,16 @@ class DataProcessing(object):
                 mut_pos = pos_in_seq_bef + d[index]
                 seq = str(-self.fasta[record.CHROM]
                           [ss_pos - pos_in_seq_after:ss_pos + pos_in_seq_bef])
-                
+
                 mut_seq = seq[:mut_pos] + \
                     str(Seq(record.ALT[0]).complement()) + seq[mut_pos + 1:]
-                    
+
             if self.ss == "donor":
-                assert any(x[70:72] for x in [seq, mut_seq]), "Positions 71 and 72 should contain GT"
+                assert any(x[70:72] for x in [seq, mut_seq]
+                           ), "Positions 71 and 72 should contain GT"
             else:
-                assert any(x[68:70] for x in [seq, mut_seq]), "Positions 69 and 70 should contain AG"
+                assert any(x[68:70] for x in [seq, mut_seq]
+                           ), "Positions 69 and 70 should contain AG"
 
             out_dict[header_wt] = seq
             out_dict[header_mut] = mut_seq
@@ -319,7 +385,7 @@ class DataProcessing(object):
             logging.info(
                 "[Splice2Deep {}] Variant {} discarded. Reason: There is only support for SNVs".format(self.ss, id))
         return out_dict
-    
+
     def Splice2Deep(self,
                     record: cyvcf2.Variant,
                     vep_annotation: str,
@@ -522,8 +588,9 @@ def main():
                         help='Generate input for DSSP model (140bp sequences). Putative splice site positions need be in positions 69 and 70 (for acceptors) and 71 and 72 (for donors).')
     parser.add_argument('--splicerover', action='store_true',
                         help='Generate input for SpliceRover model (400bp sequences). Putative splice site positions will be around positions 200 and 201.')
-    
-    
+    parser.add_argument('--hexplorer', action='store_true',
+                        help='Generate input for HEXplorer web tool. Sequences of 121bp for each mutation will be generated (mutation at pos 61).')
+
     args = parser.parse_args()
 
     # Initial checks
@@ -540,7 +607,8 @@ def main():
                         splice2deep=args.splice2deep,
                         spliceator=args.spliceator,
                         dssp=args.dssp,
-                        splicerover=args.splicerover)
+                        splicerover=args.splicerover,
+                        hexplorer=args.hexplorer)
 
 
 if __name__ == '__main__':

@@ -2,6 +2,13 @@
 .vscode
 
 # 
+**/*.tsv
+**/*.txt
+**/*.fa
+**/*vcf
+**/*vcf.gz
+
+# 
 **/tests
 
 # Byte-compiled / optimized / DLL files
