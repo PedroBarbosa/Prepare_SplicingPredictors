@@ -1,7 +1,7 @@
 import sys
 from turtle import pos
 
-from numpy import ctypeslib
+from numpy import ctypeslib, var
 from vcf_utils import *
 import cyvcf2
 import hgvs.parser
@@ -57,11 +57,13 @@ class DataProcessing(object):
                  outbasename: str,
                  ss: str = None,
                  svm_bp_finder: bool = False,
+                 maxentscan: bool = False,
                  spliceator: bool = False,
                  splice2deep: bool = False,
                  splicerover: bool = False,
                  dssp: bool = False,
-                 hexplorer: bool = False):
+                 hexplorer: bool = False,
+                 esefinder: bool = False):
 
         self.hp = hgvs.parser.Parser()
         self.vep_tag = vep_tag
@@ -70,16 +72,18 @@ class DataProcessing(object):
         self.outbasename = outbasename
         self.ss = ss
         self.svm_bp_finder = svm_bp_finder
+        self.maxentscan = maxentscan
         self.spliceator = spliceator
         self.splice2deep = splice2deep
         self.dssp = dssp
         self.splicerover = splicerover
         self.hexplorer = hexplorer
+        self.esefinder = esefinder
         self._iterate_vcf(vcf)
 
     def _iterate_vcf(self, vcf):
 
-        fasta_svm_bp, fasta_spliceator, fasta_splice2deep, fasta_dssp, fasta_splicerover = {}, {}, {}, {}, {}
+        fasta_svm_bp, fasta_maxentscan, fasta_spliceator, fasta_splice2deep, fasta_dssp, fasta_splicerover, fasta_esefinder = {}, {}, {}, {}, {}, {}, {}
         hexplorer_mapping, hexplorer_ref, hexplorer_mut = {}, "", ""
 
         for record in VCF(vcf):
@@ -100,6 +104,10 @@ class DataProcessing(object):
                                                   vep_annotation,
                                                   out_dict=fasta_svm_bp)
 
+            if self.maxentscan:
+                fasta_maxentscan = self.MaxEntScan(record,
+                                                   vep_annotation,
+                                                   out_dict=fasta_maxentscan)
             if self.spliceator:
                 fasta_spliceator = self.Spliceator(record,
                                                    vep_annotation,
@@ -118,6 +126,9 @@ class DataProcessing(object):
                 fasta_splicerover = self.SpliceRover(
                     record, vep_annotation, out_dict=fasta_splicerover)
 
+            if self.esefinder:
+                fasta_splicerover = self.ESEfinder(
+                    record, vep_annotation, out_dict=fasta_esefinder)
             if self.hexplorer:
                 hexplorer_mapping, hexplorer_ref, hexplorer_mut = self.HEXplorer(record,
                                                                                  vep_annotation,
@@ -131,6 +142,9 @@ class DataProcessing(object):
             _dict_to_fasta(
                 fasta_svm_bp, '{}_SVM_BP_finder.fa'.format(self.outbasename))
 
+        if self.maxentscan:
+            _dict_to_fasta(fasta_maxentscan, '{}_MaxEntScan_{}.fa'.format(self.outbasename, self.ss))
+            
         if self.spliceator:
             _dict_to_fasta(fasta_spliceator, '{}_Spliceator_{}.fa'.format(
                 self.outbasename, self.ss))
@@ -147,6 +161,10 @@ class DataProcessing(object):
             _dict_to_fasta(fasta_splicerover, '{}_SpliceRover_{}.fa'.format(
                 self.outbasename, self.ss))
 
+        if self.esefinder:
+            _dict_to_fasta(fasta_esefinder, '{}_ESEfinder.fa'.format(
+                self.outbasename))
+            
         if self.hexplorer:
             f = open('{}_HEXplorer_map.tsv'.format(self.outbasename), 'w')
             for v_id, seq_mut_pos in hexplorer_mapping.items():
@@ -157,6 +175,40 @@ class DataProcessing(object):
                 self.outbasename, hexplorer_ref, hexplorer_mut))
             f.close()
 
+    def ESEfinder(self,
+                    record: cyvcf2.Variant,
+                    vep_annotation: str,
+                    out_dict: dict):
+        """
+        21bp sequences will be generated with each
+        variant being located in the middle position (61).
+        """
+        id = record.CHROM + "_" + \
+            str(record.POS) + "_" + record.REF + "_" + record.ALT[0]
+        header_wt = id + "_WT"
+        header_mut = id + "_Mutated"
+        strand = vep_annotation.split("|")[self.vep_indexes['strand']]
+        if record.var_type in ['snp']:
+
+            if strand == "1":
+                seq_wt = str(self.fasta[record.CHROM]
+                             [record.POS - 11:record.POS + 10])
+                seq_mut = seq_wt[:10] + record.ALT[0] + seq_wt[11:]
+
+            elif strand == "-1":
+
+                seq_wt = str(-self.fasta[record.CHROM]
+                             [record.POS - 11:record.POS + 10])
+                seq_mut = seq_wt[:10] + \
+                    str(Seq(record.ALT[0]).complement()) + seq_wt[11:]
+
+            out_dict[header_wt] = seq_wt
+            out_dict[header_mut] = seq_mut
+            
+        else:
+            logging.info("[ESEfinder] Variant {} discarded. Reason: There is only support for SNVs".format(id))
+            return out_dict
+        
     def HEXplorer(self,
                   record: cyvcf2.Variant,
                   vep_annotation: str,
@@ -174,30 +226,32 @@ class DataProcessing(object):
         if record.var_type in ['snp']:
 
             if strand == "1":
-                seq_wt = str(self.fasta[record.CHROM][record.POS - 61:record.POS + 60])
+                seq_wt = str(self.fasta[record.CHROM]
+                             [record.POS - 61:record.POS + 60])
                 seq_mut = seq_wt[:60] + record.ALT[0] + seq_wt[61:]
-            
+
             elif strand == "-1":
-   
+
                 seq_wt = str(-self.fasta[record.CHROM]
                              [record.POS - 61:record.POS + 60])
                 seq_mut = seq_wt[:60] + \
                     str(Seq(record.ALT[0]).complement()) + seq_wt[61:]
-       
+
             if len(variant_seq_map) >= 1:
                 variant_seq_map[id] = 121 * len(variant_seq_map) + 121 - 61
             else:
                 variant_seq_map[id] = 60
-    
-            hexplorer_ref_seq += seq_wt            
+
+            hexplorer_ref_seq += seq_wt
             hexplorer_mut_seq += seq_mut
 
             return variant_seq_map, hexplorer_ref_seq, hexplorer_mut_seq
-    
+
         else:
-            logging.info("[HEXplorer] Variant {} discarded. Reason: There is only support for SNVs".format(id))
+            logging.info(
+                "[HEXplorer] Variant {} discarded. Reason: There is only support for SNVs".format(id))
             return variant_seq_map, hexplorer_ref_seq, hexplorer_mut_seq
-        
+
     def SpliceRover(self,
                     record: cyvcf2.Variant,
                     vep_annotation: str,
@@ -464,6 +518,44 @@ class DataProcessing(object):
                 "[Splice2Deep {}] Variant {} discarded. Reason: There is only support for SNVs".format(self.ss, id))
         return out_dict
 
+    def MaxEntScan(self,
+                   record: cyvcf2.Variant,
+                   vep_annotation: str,
+                   out_dict: dict):
+        """
+        17bp (for donors) or 45bp (for acceptors) sequences will be generated
+        to test the sliding window approach
+        """
+        assert self.ss in [
+            'donor', 'acceptor'], "--maxentscan requires --splice_site to be set (donor or acceptor)"
+        
+        id = record.CHROM + "_" + \
+            str(record.POS) + "_" + record.REF + "_" + record.ALT[0]
+        header_wt = id + "_WT"
+        header_mut = id + "_Mutated"
+        strand = vep_annotation.split("|")[self.vep_indexes['strand']]
+        context = 8 if self.ss == "donor" else 22
+        if record.var_type in ['snp']:
+            if strand == "1":
+          
+                seq_wt = str(self.fasta[record.CHROM]
+                             [record.POS - context -1:record.POS + context])
+                seq_mut = seq_wt[:context] + record.ALT[0] + seq_wt[context + 1:]
+
+            elif strand == "-1":
+
+                seq_wt = str(-self.fasta[record.CHROM]
+                             [record.POS - context - 1:record.POS + context])
+                seq_mut = seq_wt[:context] + \
+                    str(Seq(record.ALT[0]).complement()) + seq_wt[context + 1:]
+            out_dict[header_wt] = seq_wt
+            out_dict[header_mut] = seq_mut
+
+        else:
+            logging.info(
+                "[MaxEntScan {}] Variant {} discarded. Reason: There is only support for SNVs".format(self.ss, id))
+        return out_dict
+        
     def SVM_BP_finder(self,
                       record: cyvcf2.Variant,
                       vep_annotation: str,
@@ -580,6 +672,8 @@ def main():
                         'ANN', 'CSQ'], help='Field in VCF where VEP annotations are stored. Default: "CSQ".')
     parser.add_argument('--svm_bp_finder', action='store_true',
                         help='Generate input for SVM-BP finder tool. Only sequences that refer to the end of introns will be written')
+    parser.add_argument('--maxentscan', action='store_true',
+                        help='Generate input for maxentscanpy utility.')
     parser.add_argument('--splice2deep', action='store_true',
                         help='Generate input for Splice2Deep donor model (602bp sequences). Putative splice site positions need to be in positions 300 and 301.')
     parser.add_argument('--spliceator', action='store_true',
@@ -590,7 +684,8 @@ def main():
                         help='Generate input for SpliceRover model (400bp sequences). Putative splice site positions will be around positions 200 and 201.')
     parser.add_argument('--hexplorer', action='store_true',
                         help='Generate input for HEXplorer web tool. Sequences of 121bp for each mutation will be generated (mutation at pos 61).')
-
+    parser.add_argument('--esefinder', action='store_true',
+                        help='Generate input for ESEfinder web tool. Sequences of 21bp for each mutation will be generated (mutation at pos 11).')
     args = parser.parse_args()
 
     # Initial checks
@@ -604,11 +699,13 @@ def main():
                         outbasename=args.outbasename,
                         ss=args.ss,
                         svm_bp_finder=args.svm_bp_finder,
+                        maxentscan=args.maxentscan,
                         splice2deep=args.splice2deep,
                         spliceator=args.spliceator,
                         dssp=args.dssp,
                         splicerover=args.splicerover,
-                        hexplorer=args.hexplorer)
+                        hexplorer=args.hexplorer,
+                        esefinder=args.esefinder)
 
 
 if __name__ == '__main__':

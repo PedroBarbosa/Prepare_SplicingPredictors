@@ -10,5 +10,6 @@ dependencies:
   - pyfaidx=0.7.1
   - cyvcf2=0.30.16
   - pandas
+  - maxentpy
   - pip:
      - hgvs=1.5.2
