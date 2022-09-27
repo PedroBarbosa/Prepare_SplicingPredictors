@@ -4,7 +4,7 @@ Step to generate DSSP finder results:
 `vcf2seq infile_donor.vcf.gz hg19_genome.fa out -ss donor --dssp`\
 `vcf2seq infile_acceptor.vcf.gz hg19_genome.fa out -ss acceptor --dssp`
 
-- Clone the [official repo](https://github.com/DSSP-github/DSSP), make sure the dependecnies are installed, and run the donor and acceptor models:\
+- Clone the [official repo](https://github.com/DSSP-github/DSSP), make sure the dependencies are installed, and run the donor and acceptor models:\
 `python DS_DSSP.py -I out_DSSP_donor.fa -O dssp_donor_out.tsv`
 `python AS_DSSP.py -I out_DSSP_acceptor.fa -O dssp_acceptor_out.tsv`\
 

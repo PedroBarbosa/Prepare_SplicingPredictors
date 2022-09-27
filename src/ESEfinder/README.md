@@ -1,7 +1,7 @@
 Step to generate ESEfinder results:
 
 - Generate input sequences from VCF (if ):\
-`vcf2seq infile.vcf.gz hg19_genome.fa out --esefinder`\
+`vcf2seq infile.vcf.gz hg19_genome.fa out --esefinder`
     - If there are many variants in VCF, it's better to split them in several files, since the ESEfinder server has a limit in the maximum number of nucleotides (all sequences combined) allowed as input.
     - The input is prepared in a way that all variants can be tested at once. For each variant, we extract 10bp on each side, and ESEfinder will score at each position of the input the value for SR protein.
 

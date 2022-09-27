@@ -63,7 +63,8 @@ class DataProcessing(object):
                  splicerover: bool = False,
                  dssp: bool = False,
                  hexplorer: bool = False,
-                 esefinder: bool = False):
+                 esefinder: bool = False,
+                 esrseq: bool = False):
 
         self.hp = hgvs.parser.Parser()
         self.vep_tag = vep_tag
@@ -79,11 +80,12 @@ class DataProcessing(object):
         self.splicerover = splicerover
         self.hexplorer = hexplorer
         self.esefinder = esefinder
+        self.esrseq = esrseq
         self._iterate_vcf(vcf)
 
     def _iterate_vcf(self, vcf):
 
-        fasta_svm_bp, fasta_maxentscan, fasta_spliceator, fasta_splice2deep, fasta_dssp, fasta_splicerover, fasta_esefinder = {}, {}, {}, {}, {}, {}, {}
+        fasta_svm_bp, fasta_maxentscan, fasta_spliceator, fasta_splice2deep, fasta_dssp, fasta_splicerover, fasta_esefinder, fasta_esrseq = {}, {}, {}, {}, {}, {}, {}, {}
         hexplorer_mapping, hexplorer_ref, hexplorer_mut = {}, "", ""
 
         for record in VCF(vcf):
@@ -129,12 +131,17 @@ class DataProcessing(object):
             if self.esefinder:
                 fasta_splicerover = self.ESEfinder(
                     record, vep_annotation, out_dict=fasta_esefinder)
+            
             if self.hexplorer:
                 hexplorer_mapping, hexplorer_ref, hexplorer_mut = self.HEXplorer(record,
                                                                                  vep_annotation,
                                                                                  variant_seq_map=hexplorer_mapping,
                                                                                  hexplorer_ref_seq=hexplorer_ref,
                                                                                  hexplorer_mut_seq=hexplorer_mut)
+            
+            if self.esrseq:
+                fasta_esrseq = self.ESRseq(record, vep_annotation, out_dict=fasta_esrseq)
+                
         ###################
         ## WRITE OUTPUT  ##
         ###################
@@ -164,6 +171,9 @@ class DataProcessing(object):
         if self.esefinder:
             _dict_to_fasta(fasta_esefinder, '{}_ESEfinder.fa'.format(
                 self.outbasename))
+        
+        if self.esrseq:
+            _dict_to_fasta(fasta_esrseq, '{}_ESRseq.fa'.format(self.outbasename))
             
         if self.hexplorer:
             f = open('{}_HEXplorer_map.tsv'.format(self.outbasename), 'w')
@@ -175,6 +185,41 @@ class DataProcessing(object):
                 self.outbasename, hexplorer_ref, hexplorer_mut))
             f.close()
 
+    def ESRseq(self,
+               record: cyvcf2.Variant,
+               vep_annotation: str,
+               out_dict: dict):
+        """
+        11bp sequences will be generated with each
+        variant being located in the middle position (6).
+        """
+        id = record.CHROM + "_" + \
+            str(record.POS) + "_" + record.REF + "_" + record.ALT[0]
+        header_wt = id + "_WT"
+        header_mut = id + "_Mutated"
+        strand = vep_annotation.split("|")[self.vep_indexes['strand']]
+        if record.var_type in ['snp']:
+    
+            if strand == "1":
+                seq_wt = str(self.fasta[record.CHROM]
+                             [record.POS - 6:record.POS + 5])
+                seq_mut = seq_wt[:5] + record.ALT[0] + seq_wt[6:]
+
+            elif strand == "-1":
+
+                seq_wt = str(-self.fasta[record.CHROM]
+                             [record.POS -6:record.POS + 5])
+                seq_mut = seq_wt[:5] + \
+                    str(Seq(record.ALT[0]).complement()) + seq_wt[6:]
+
+            out_dict[header_wt] = seq_wt
+            out_dict[header_mut] = seq_mut
+            
+        else:
+            logging.info("[ESRseq] Variant {} discarded. Reason: There is only support for SNVs".format(id))
+        return out_dict
+        
+        
     def ESEfinder(self,
                     record: cyvcf2.Variant,
                     vep_annotation: str,
@@ -207,7 +252,7 @@ class DataProcessing(object):
             
         else:
             logging.info("[ESEfinder] Variant {} discarded. Reason: There is only support for SNVs".format(id))
-            return out_dict
+        return out_dict
         
     def HEXplorer(self,
                   record: cyvcf2.Variant,
@@ -686,6 +731,8 @@ def main():
                         help='Generate input for HEXplorer web tool. Sequences of 121bp for each mutation will be generated (mutation at pos 61).')
     parser.add_argument('--esefinder', action='store_true',
                         help='Generate input for ESEfinder web tool. Sequences of 21bp for each mutation will be generated (mutation at pos 11).')
+    parser.add_argument('--esrseq', action='store_true',
+                        help='Generate input to calculate delta ESRseq scores. Sequences of 11bp for each mutation will be generated (mutation at pos 6)')
     args = parser.parse_args()
 
     # Initial checks
@@ -705,7 +752,8 @@ def main():
                         dssp=args.dssp,
                         splicerover=args.splicerover,
                         hexplorer=args.hexplorer,
-                        esefinder=args.esefinder)
+                        esefinder=args.esefinder,
+                        esrseq=args.esrseq)
 
 
 if __name__ == '__main__':
