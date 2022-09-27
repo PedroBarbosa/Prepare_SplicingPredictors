@@ -12,4 +12,4 @@ dependencies:
   - pandas
   - maxentpy
   - pip:
-     - hgvs=1.5.2
+     - hgvs==1.5.2
