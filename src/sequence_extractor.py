@@ -57,6 +57,7 @@ class DataProcessing(object):
                  outbasename: str,
                  ss: str = None,
                  svm_bp_finder: bool = False,
+                 bpp: bool = False,
                  maxentscan: bool = False,
                  spliceator: bool = False,
                  splice2deep: bool = False,
@@ -73,6 +74,7 @@ class DataProcessing(object):
         self.outbasename = outbasename
         self.ss = ss
         self.svm_bp_finder = svm_bp_finder
+        self.bpp = bpp
         self.maxentscan = maxentscan
         self.spliceator = spliceator
         self.splice2deep = splice2deep
@@ -85,7 +87,7 @@ class DataProcessing(object):
 
     def _iterate_vcf(self, vcf):
 
-        fasta_svm_bp, fasta_maxentscan, fasta_spliceator, fasta_splice2deep, fasta_dssp, fasta_splicerover, fasta_esefinder, fasta_esrseq = {}, {}, {}, {}, {}, {}, {}, {}
+        fasta_bpp, fasta_svm_bp, fasta_maxentscan, fasta_spliceator, fasta_splice2deep, fasta_dssp, fasta_splicerover, fasta_esefinder, fasta_esrseq = {}, {}, {}, {}, {}, {}, {}, {}, {}
         hexplorer_mapping, hexplorer_ref, hexplorer_mut = {}, "", ""
 
         for record in VCF(vcf):
@@ -102,10 +104,17 @@ class DataProcessing(object):
                 continue
 
             if self.svm_bp_finder:
-                fasta_svm_bp = self.SVM_BP_finder(record,
+                fasta_svm_bp = self.BranchpointTools(record,
                                                   vep_annotation,
-                                                  out_dict=fasta_svm_bp)
+                                                  out_dict=fasta_svm_bp,
+                                                  tool='SVM_BP_finder')
 
+            if self.bpp:
+                fasta_bpp = self.BranchpointTools(record,
+                                     vep_annotation,
+                                     out_dict=fasta_bpp,
+                                     tool='BPP')
+                
             if self.maxentscan:
                 fasta_maxentscan = self.MaxEntScan(record,
                                                    vep_annotation,
@@ -149,6 +158,9 @@ class DataProcessing(object):
             _dict_to_fasta(
                 fasta_svm_bp, '{}_SVM_BP_finder.fa'.format(self.outbasename))
 
+        if self.bpp:
+            _dict_to_fasta(fasta_bpp, '{}_BPP.fa'.format(self.outbasename))
+            
         if self.maxentscan:
             _dict_to_fasta(fasta_maxentscan, '{}_MaxEntScan_{}.fa'.format(self.outbasename, self.ss))
             
@@ -601,10 +613,13 @@ class DataProcessing(object):
                 "[MaxEntScan {}] Variant {} discarded. Reason: There is only support for SNVs".format(self.ss, id))
         return out_dict
         
-    def SVM_BP_finder(self,
-                      record: cyvcf2.Variant,
-                      vep_annotation: str,
-                      out_dict: dict):
+   
+    def BranchpointTools(self,
+            record: cyvcf2.Variant,
+            vep_annotation: str,
+            out_dict: dict,
+            tool: str,
+            seq_size: str = 500):
 
         hgvs = vep_annotation.split("|")[self.vep_indexes['hgvsc']]
 
@@ -616,15 +631,15 @@ class DataProcessing(object):
 
         if offset == 0:
             logging.info(
-                '[SVM-BP_finder] Variant {} discarded. Reason: Not intronic ({}).'.format(id, hgvs))
+                '[{}] Variant {} discarded. Reason: Not intronic ({}).'.format(tool, id, hgvs))
 
         elif offset > 0:
             logging.info(
-                '[SVM-BP_finder] Variant {} discarded. Reason: Positive HGVSc offset ({}).'.format(id, hgvs))
+                '[{}] Variant {} discarded. Reason: Positive HGVSc offset ({}).'.format(tool, id, hgvs))
 
-        elif offset < -500:
+        elif offset < -seq_size:
             logging.info(
-                '[SVM-BP_finder] Variant {} discarded. Reason: Too far away from splicing acceptor (Max=500; Observed={}).'.format(id, offset))
+                '[{}] Variant {} discarded. Reason: Too far away from splicing acceptor (Max={}; Observed={}).'.format(tool, id, seq_size, offset))
 
         else:
             header_wt = id + "_WT"
@@ -640,7 +655,7 @@ class DataProcessing(object):
                     seq_down_mut = record.ALT[0] + \
                         seq_down_wt[len(record.REF):]
 
-                    bp_ups_wt = 500 - len(seq_down_wt)
+                    bp_ups_wt = seq_size - len(seq_down_wt)
                     seq_upst = str(
                         self.fasta[record.CHROM][record.POS - 1 - bp_ups_wt: record.POS - 1])
 
@@ -651,7 +666,7 @@ class DataProcessing(object):
                     seq_down_mut = str(
                         Seq(record.ALT[0]).reverse_complement()) + seq_down_wt[len(record.REF):]
 
-                    bp_ups_wt = 500 - len(seq_down_wt)
+                    bp_ups_wt = seq_size - len(seq_down_wt)
                     seq_upst = str(-self.fasta[record.CHROM][record.POS + len(
                         record.REF) - 1: record.POS + bp_ups_wt + len(record.REF) - 1])
 
@@ -667,8 +682,8 @@ class DataProcessing(object):
                         self.fasta[record.CHROM][record.POS: record.POS + abs(offset)])
                     seq_down_mut = seq_down_wt[del_size:]
 
-                    bp_ups_wt = 500 - len(seq_down_wt)
-                    bp_ups_mut = 500 - len(seq_down_mut)
+                    bp_ups_wt = seq_size - len(seq_down_wt)
+                    bp_ups_mut = seq_size - len(seq_down_mut)
 
                     seq_upst_wt = str(
                         self.fasta[record.CHROM][record.POS - 1 - bp_ups_wt: record.POS - 1])
@@ -681,8 +696,8 @@ class DataProcessing(object):
                         offset) + del_size: record.POS + del_size])
                     seq_down_mut = seq_down_wt[del_size:]
 
-                    bp_ups_wt = 500 - len(seq_down_wt)
-                    bp_ups_mut = 500 - len(seq_down_mut)
+                    bp_ups_wt = seq_size - len(seq_down_wt)
+                    bp_ups_mut = seq_size - len(seq_down_mut)
 
                     seq_upst_wt = str(-self.fasta[record.CHROM][record.POS +
                                       del_size: record.POS + del_size + bp_ups_wt])
@@ -717,6 +732,8 @@ def main():
                         'ANN', 'CSQ'], help='Field in VCF where VEP annotations are stored. Default: "CSQ".')
     parser.add_argument('--svm_bp_finder', action='store_true',
                         help='Generate input for SVM-BP finder tool (500bp upstream of acceptor site). Only sequences that refer to the end of introns will be written')
+    parser.add_argument('--bpp', action='store_true',
+                        help='Generate input for BPP (200bp upstream of acceptor site). Only sequences that refer to the end of introns will be written')
     parser.add_argument('--maxentscan', action='store_true',
                         help='Generate input for maxentscanpy utility.')
     parser.add_argument('--splice2deep', action='store_true',
@@ -746,6 +763,7 @@ def main():
                         outbasename=args.outbasename,
                         ss=args.ss,
                         svm_bp_finder=args.svm_bp_finder,
+                        bpp=args.bpp,
                         maxentscan=args.maxentscan,
                         splice2deep=args.splice2deep,
                         spliceator=args.spliceator,

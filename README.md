@@ -42,5 +42,7 @@ Note: Do not change the fasta headers of the generated sequences, since the `get
 
 #### Branchpoint signals
 * [SVM-BPfinder](https://journals.plos.org/ploscompbiol/article?id=10.1371/journal.pcbi.1001016)
+* [BPP](https://academic.oup.com/bioinformatics/article/33/20/3166/3870482)
+
 ### Limitations
 Only single-nucleotide variants (SNVs) are supported.
