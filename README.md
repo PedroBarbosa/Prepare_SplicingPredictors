@@ -24,6 +24,8 @@ vcf2seq input.vcf.gz reference_genome.fa outbasename --maxentscan --splicerover 
 For models that predict splice sites, it may be necessary to set the splice site flag (`--ss donor`, `--ss acceptor`).
 Then, within each model folder (`src` folder in this repo), there are instructions on how to run each model and a script (`get_mutation_effects.py`) to process the output and generate a VCF with the predictions.
 
+Note: Do not change the fasta headers of the generated sequences, since the `get_mutation_effects.py` scripts require original names for proper processing.
+
 ### Supported models
 
 #### Splice site prediction

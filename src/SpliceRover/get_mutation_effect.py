@@ -15,7 +15,12 @@ map_fasta_ids = pd.DataFrame.from_dict(map_fasta_ids, orient='index',
 # Preds
 preds_df = pd.read_csv(sys.argv[2], index_col=False, names=['id','pos', 'seq_motif', 'pred'], sep=",")
 preds_df['pos'] += 1
-df = pd.merge(preds_df, map_fasta_ids, on='id', how='left')
+
+# Add model predictions (zeros) filtered out from website
+df = pd.merge(map_fasta_ids, preds_df, on='id', how='left')
+
+df['pos'] = df.pos.fillna(-1)
+df['pred'] = df.pred.fillna(0)
 
 df[['v_id', 'group']] = df.seq_id.str.rsplit('_', n=1, expand=True)
 df.drop(columns='seq_id', inplace=True)
@@ -24,7 +29,7 @@ def get_diff(group: pd.DataFrame):
 
     nrows = group.shape[0]
     if nrows == 1:
-        
+  
         if group.iloc[0,:].group == "Mutated":
             return group.iloc[0,:].pred.item()
         
@@ -41,7 +46,9 @@ def get_diff(group: pd.DataFrame):
         raise ValueError('Too many rows in groupby')
 
 df['pred'] = df.pred.astype(float)
+
 df = df.groupby(['v_id', 'pos']).apply(get_diff).reset_index()
+
 df = df.rename(columns={0: 'diff'})
 df = df.loc[df.groupby('v_id')['diff'].apply(lambda x: x.abs().idxmax())]
 
@@ -57,5 +64,5 @@ for i, row in df.iterrows():
     pos = fields[1]
     ref = fields[2]
     alt = fields[3]
-    info = "SpliceRover={}|{};".format(str(row.pos), str(round(row['diff'], 3)))
+    info = "SpliceRover={}|{};".format(str(int(row.pos)), str(round(row['diff'], 3)))
     print('{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}'.format(chrom, pos, row.v_id, ref, alt, '.', '.', info))

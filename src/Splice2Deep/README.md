@@ -4,7 +4,7 @@ Step to generate Splice2Deep finder results:
 `vcf2seq infile_donor.vcf.gz hg19_genome.fa out -ss donor --splice2deep`\
 `vcf2seq infile_acceptor.vcf.gz hg19_genome.fa out --ss acceptor --splice2deep`
 
-- Downlaod the [official repo](https://github.com/SomayahAlbaradei/Splice_Deep), make sure the dependecnies are installed, and run the donor model (input fasta should be in the 'Data' directory of the repo):\
+- Download the [official repo](https://github.com/SomayahAlbaradei/Splice_Deep), make sure the dependencies are installed, and run the donor model (input fasta should be in the 'Data' directory of the repo):\
 `python Splice_Deep_Donor.py org='hs' Input='new_donor_Splice2Deep_donor.fa' Output='new_donor_preds.txt'`\
 `python Splice_Deep_Acceptor.py org='hs' Input='new_acceptor_Splice2Deep_acceptor.fa' Output='new_acceptor_preds.txt'`
 

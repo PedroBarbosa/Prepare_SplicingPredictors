@@ -29,5 +29,5 @@ for v_id, value in score_diff.items():
     pos = fields[1]
     ref = fields[2]
     alt = fields[3]
-    info = "DSSP={}".format(str(value))
+    info = "DSSP={}".format(str(round(value,3)))
     print('{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}'.format(chrom, pos, v_id, ref, alt, '.', '.', info))

@@ -3,10 +3,14 @@
 
 # 
 #**/*.tsv
+**/*.csv
+**/*.tsv
+**/*.conf
 **/*.txt
 **/*.fa
 **/*vcf
 **/*vcf.gz
+**/*vcf.gz.tbi
 
 # 
 **/tests

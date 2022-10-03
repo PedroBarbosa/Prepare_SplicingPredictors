@@ -323,8 +323,8 @@ class DataProcessing(object):
                     return out_dict
 
                 seq_wt = str(self.fasta[record.CHROM]
-                             [record.POS - 200:record.POS + 200])
-                seq_mut = seq_wt[:199] + record.ALT[0] + seq_wt[200:]
+                             [record.POS - 250:record.POS + 250])
+                seq_mut = seq_wt[:249] + record.ALT[0] + seq_wt[250:]
 
             elif strand == "-1":
                 # Just to check motif presence
@@ -337,9 +337,9 @@ class DataProcessing(object):
                     return out_dict
 
                 seq_wt = str(-self.fasta[record.CHROM]
-                             [record.POS - 200:record.POS + 200])
-                seq_mut = seq_wt[:199] + \
-                    str(Seq(record.ALT[0]).complement()) + seq_wt[200:]
+                             [record.POS - 250:record.POS + 250])
+                seq_mut = seq_wt[:249] + \
+                    str(Seq(record.ALT[0]).complement()) + seq_wt[250:]
 
             out_dict[header_wt] = seq_wt
             out_dict[header_mut] = seq_mut
@@ -716,7 +716,7 @@ def main():
     parser.add_argument('--vep_tag', default='CSQ', choices=[
                         'ANN', 'CSQ'], help='Field in VCF where VEP annotations are stored. Default: "CSQ".')
     parser.add_argument('--svm_bp_finder', action='store_true',
-                        help='Generate input for SVM-BP finder tool. Only sequences that refer to the end of introns will be written')
+                        help='Generate input for SVM-BP finder tool (500bp upstream of acceptor site). Only sequences that refer to the end of introns will be written')
     parser.add_argument('--maxentscan', action='store_true',
                         help='Generate input for maxentscanpy utility.')
     parser.add_argument('--splice2deep', action='store_true',
@@ -726,7 +726,7 @@ def main():
     parser.add_argument('--dssp', action='store_true',
                         help='Generate input for DSSP model (140bp sequences). Putative splice site positions need be in positions 69 and 70 (for acceptors) and 71 and 72 (for donors).')
     parser.add_argument('--splicerover', action='store_true',
-                        help='Generate input for SpliceRover model (400bp sequences). Putative splice site positions will be around positions 200 and 201.')
+                        help='Generate input for SpliceRover model (400bp sequences). Putative splice site positions will be around positions 200 and 201. Be default, we generate 500bp sequence so that splice sites can be predicted between position 150 and 250')
     parser.add_argument('--hexplorer', action='store_true',
                         help='Generate input for HEXplorer web tool. Sequences of 121bp for each mutation will be generated (mutation at pos 61).')
     parser.add_argument('--esefinder', action='store_true',
