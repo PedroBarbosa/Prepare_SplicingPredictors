@@ -11,5 +11,6 @@ dependencies:
   - cyvcf2=0.30.16
   - pandas
   - maxentpy
+  - psycopg2
   - pip:
      - hgvs==1.5.2
