@@ -1,5 +1,5 @@
 # Preparing splicing-related models
-A simple utility to generate correct input for a set of models that require sequence information.
+A simple utility to process VCF files and generate correct input for a set of models that require sequence information (or that require specific format to run a web-based application).
 
 ### Motivation
 There are a lot of available methods that predict splicing-related information (e.g. splice sites, branchpoints, splicing regulatory elements). Since they were not originally designed to predict the effect of genetic variants, it is not straightforward to use these models for that task. This tool simplifies that goal: generates reference and mutated sequences from VCF files in the proper format to run several models for all variants at once, and contains utilities to process the output and generate a VCF with a final score (usually mutated allele - reference allele).
@@ -27,7 +27,9 @@ Then, within each model folder (`src` folder in this repo), there are instructio
 Note: Do not change the fasta headers of the generated sequences, since the `get_mutation_effects.py` scripts require original names for proper processing.
 
 ### Supported models
-
+#### General methods
+* [regSNP-intron](https://genomebiology.biomedcentral.com/articles/10.1186/s13059-019-1847-4)
+  
 #### Splice site prediction
 * [Splice2deep](https://www.sciencedirect.com/science/article/pii/S2590158320300097)
 * [SpliceRover](https://pubmed.ncbi.nlm.nih.gov/29931149/)
@@ -43,6 +45,7 @@ Note: Do not change the fasta headers of the generated sequences, since the `get
 #### Branchpoint signals
 * [SVM-BPfinder](https://journals.plos.org/ploscompbiol/article?id=10.1371/journal.pcbi.1001016)
 * [BPP](https://academic.oup.com/bioinformatics/article/33/20/3166/3870482)
-
+* [BPHunter](https://www.pnas.org/doi/10.1073/pnas.2211194119)
+* 
 ### Limitations
 Only single-nucleotide variants (SNVs) are supported.
