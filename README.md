@@ -5,7 +5,9 @@ A simple utility to process VCF files and generate correct input for a set of mo
 There are a lot of available methods that predict splicing-related information (e.g. splice sites, branchpoints, splicing regulatory elements). Since they were not originally designed to predict the effect of genetic variants, it is not straightforward to use these models for that task. This tool simplifies that goal: generates reference and mutated sequences from VCF files in the proper format to run several models for all variants at once, and contains utilities to process the output and generate a VCF with a final score (usually mutated allele - reference allele).
 
 ### Requirements 
-The variants should be annotated with ensembl VEP so that strand information can be retrieved (and therefore the proper sequence context of the variant can be extracted).
+* The variants should be annotated with ensembl VEP so that strand information can be retrieved (and therefore the proper sequence context of the variant can be extracted).
+* Processing scripts **do not** expect chromosome notation to contain `chr` string.
+
 
 ### Instalation
 ```
@@ -46,6 +48,6 @@ Note: Do not change the fasta headers of the generated sequences, since the `get
 * [SVM-BPfinder](https://journals.plos.org/ploscompbiol/article?id=10.1371/journal.pcbi.1001016)
 * [BPP](https://academic.oup.com/bioinformatics/article/33/20/3166/3870482)
 * [BPHunter](https://www.pnas.org/doi/10.1073/pnas.2211194119)
-* 
+  
 ### Limitations
 Only single-nucleotide variants (SNVs) are supported.
