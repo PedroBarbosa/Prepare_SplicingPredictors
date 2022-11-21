@@ -1,6 +1,7 @@
 Step to generate BPHunter results:
 
-- No need to generate input sequences, as the software accepts VCF format.
+- No need to generate input sequences, as the software accepts VCF format. However, VCF should come without the header.
+`zcat file.vcf.gz | grep -v "^#" | cut -f1,2,3,4,5 > BPhunter_input.tsv`
 
 - Go to the [official webapp](https://hgidsoft.rockefeller.edu/BPHunter/index.php), and run the model accordingly.
 
