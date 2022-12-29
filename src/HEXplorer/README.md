@@ -8,4 +8,4 @@ Step to generate HEXplorer results:
 `cat hexplorer_results.csv | tail -n+2 | grep -v HBond > hexplorer_results_to_script.csv`
 `python get_mutation_effect hexplorer_results_to_script.csv out_HEXplorer_map.tsv | bcftools sort | bgzip > HEXplorer_to_annotate.vcf.gz`\
 
-- Optionally, annotate the `DSSP` scores into the main VCF file (to benchmark with other tools) using `vcfanno` or `bcftools annotate`
+- Optionally, annotate the `HEXplorer` scores into the main VCF file (to benchmark with other tools) using `vcfanno` or `bcftools annotate`
