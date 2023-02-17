@@ -4,7 +4,7 @@ Step to generate MaxEntScan results:
 `vcf2seq infile_donor.vcf.gz hg19_genome.fa out -ss donor --maxentscan`\
 `vcf2seq infile_acceptor.vcf.gz hg19_genome.fa out --ss acceptor --maxentscan`
 
-- Run maxentscan (make sure the package maxentscanpy is installed) and save the max effect of the mutation:\
+- Run maxentscan (make sure the package maxentscanpy is installed) and save the max effect of the mutation using a sliding window approach (as described in the [SQUIRLS paper]{https://pubmed.ncbi.nlm.nih.gov/34289339/}):\
 `python get_mutation_effect.py new_donor_MaxEntScan_donor.fa donor | bcftools sort | bgzip > maxentscan_donor_to_annotate.vcf.gz`\
 `python get_mutation_effect.py new_acceptor_MaxEntScan_acceptor.fa acceptor| bcftools sort | bgzip > maxentscan_acceptor_to_annotate.vcf.gz`
 
