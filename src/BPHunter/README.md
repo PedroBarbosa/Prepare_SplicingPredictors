@@ -1,11 +1,18 @@
-Step to generate BPHunter results:
+Software can be run using a [web interface](https://hgidsoft.rockefeller.edu/BPHunter/index.php), but we show here how to run it locally:
 
-- No need to generate input sequences, as the software accepts VCF format. However, VCF should come without the header.\
-`zcat file.vcf.gz | grep -v "^#" | cut -f1,2,3,4,5 > BPhunter_input.tsv`
+- Clone [git repository](https://github.com/casanova-lab/BPHunter.git) and make sure `bedtools` is installed.
 
-- Go to the [official webapp](https://hgidsoft.rockefeller.edu/BPHunter/index.php), and run the model accordingly.
+- Download reference datasets from [here](https://hgidsoft.rockefeller.edu/BPHunter/standalone.html) and put them in the repository folder.
 
-- Download the output and run our script to generate a VCF :\
-`python get_mutation_effect.py BPHunter_out.tsv | bcftools sort | bgzip > BPHunter.vcf.gz`
+- Unzip VCF file (e.g. with `zcat`)
 
-- Optionally, annotate the `BPHunter` scores into the main VCF file (to benchmark with other tools) using `vcfanno` or `bcftools annotate`.
+- `python BPHunter_VCF.py -i input.vcf -g GRCh37 -t all`
+
+- Generate a VCF from the raw BPHunter output:\
+`python get_mutation_effect.py input_BPHunter_output_1681231.txt | bcftools sort | bgzip > BPHunter.vcf.gz`
+
+Alternatively, if you want to score all variants in the initial VCF file (and thus evaluate its performance fairly), you can shift variants with 0 score to 1 (by providing `shift`) as the 2nd argument of the script), and then annotate the initial VCF with `vcfanno` by including postannotation step to annotate all unnanotated variants with 0. This shifting procedure was personally suggested by BPHunter author:
+
+`python get_mutation_effect.py input_BPHunter_output_1681231.txt shift | bcftools sort | bgzip > BPHunter.vcf.gz`
+
+`vcfanno -lua function.lua vcfanno.conf input.vcf.gz | bgzip > BPHunter_fully_annotated.vcf`

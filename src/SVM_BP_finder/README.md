@@ -3,7 +3,7 @@ Step to generate SVM-BP finder results:
 - Generate input sequences from VCF (500bp upstream of acceptor site):\
 `vcf2seq infile.vcf.gz hg19_genome.fa out --svm_bp_finder`
 
-- Download the [official repo](https://github.com/comprna/SVM-BPfinder), make sure the dependencies are installed, and run the model accordingly:\
+- Download the [official repo](https://github.com/comprna/SVM-BPfinder), make sure the dependencies are installed (adapt prints for Python3, if necessary), and run the model accordingly:\
 `./svm_bpfinder.py -i input_SVM_BP_finder.fa -s Hsap -l 500 -d 50 > svm_bp_out.tsv`
 
 - Select the best BP per sequence, as suggested by the authors, and automatically generate a VCF :\
