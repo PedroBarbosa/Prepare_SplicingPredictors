@@ -47,5 +47,5 @@ for i, row in results.iterrows():
     pos = fields[1]
     ref = fields[2]
     alt = fields[3]
-    info = "ESEfinder={};".format(row.pred)
+    info = "ESEfinder={}".format(row.pred)
     print('{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}'.format(chrom, pos, row.v_id, ref, alt, '.', '.', info))

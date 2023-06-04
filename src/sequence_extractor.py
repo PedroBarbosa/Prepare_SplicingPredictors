@@ -1,4 +1,5 @@
 import sys
+from typing import Tuple
 
 from vcf_utils import *
 import cyvcf2
@@ -53,6 +54,144 @@ def _dict_to_fasta(d: dict, outfile: str):
         f = open(outfile, "w")
         for k, v in d.items():
             f.write(">{}\n{}\n".format(k, v))
+
+
+def _process_snv_mnp(
+    record: cyvcf2.Variant, strand: str, fasta: Fasta, offset: int, seq_size: int = None
+) -> Tuple[str, str]:
+    """Process one SNV or MNP record and return wiltype and mutated sequences.
+
+    Args:
+        record (cyvcf2.Variant): Variant record
+        strand (str): Strand of the variant. 1 for forward, -1 for reverse.
+        fasta (Fasta): Genome object
+        offset (int): Number of bases to extract on each side of the variant, if `seq_size` is not provided.
+    If `seq_size` is provided, `offset` refers to the number of bases to extract downstream of the variant
+    (e.g., if a BP tool, offset refers to the number of the bp to extract up to the closest splicing acceptor).
+        seq_size (int): Length of the sequence to return. If `seq_size` is not provided, the sequence length is
+    calculated based on the offset and the length of the reference allele.
+    """
+    if seq_size is None:
+        seq_size = len(record.REF) + (offset * 2)
+        adjust_offset = 0
+        adjust_offset_neg = len(record.REF) - 1
+        
+    else:
+        adjust_offset = 0 if record.var_type == "mnp" else -1
+        adjust_offset_neg = 0 if record.var_type == "snv" else 1
+        
+    if strand == "1":
+    
+        seq_down_wt = str(
+            fasta[record.CHROM][
+                record.POS - 1 : record.POS + abs(offset) + adjust_offset
+            ]
+        )
+        seq_down_mut = record.ALT[0] + seq_down_wt[len(record.REF) :]
+
+        seq_upst_wt_len = seq_size - len(seq_down_wt)
+        seq_upst = str(
+            fasta[record.CHROM][record.POS - 1 - seq_upst_wt_len : record.POS - 1]
+        )
+
+    elif strand == "-1":
+        seq_down_wt = str(
+            -fasta[record.CHROM][
+                record.POS
+                - abs(offset)
+                + adjust_offset_neg
+                - 1 : record.POS 
+                + len(record.REF)
+                - 1
+            ]
+        )
+        seq_down_mut = (
+            str(Seq(record.ALT[0]).reverse_complement())
+            + seq_down_wt[len(record.REF) :]
+        )
+
+        seq_upst_wt_len = seq_size - len(seq_down_wt)
+        seq_upst = str(
+            -fasta[record.CHROM][
+                record.POS
+                + len(record.REF)
+                - 1 : record.POS
+                + seq_upst_wt_len
+                + len(record.REF)
+                - 1
+            ]
+        )
+
+    return seq_upst + seq_down_wt, seq_upst + seq_down_mut
+
+
+def _process_deletion(
+    record: cyvcf2.Variant, strand: str, fasta: Fasta, offset: int, seq_size: int = None, max_del_size: int = 10
+) -> Tuple[str, str]:
+    """Process one Deletion record and return wiltype and mutated sequences.
+
+    Args:
+        record (cyvcf2.Variant): Variant record
+        strand (str): Strand of the variant. 1 for forward, -1 for reverse.
+        fasta (Fasta): Genome object
+        offset (int): Number of bases to extract on each side of the variant, if `seq_size` is not provided.
+    If `seq_size` is provided, `offset` refers to the number of bases to extract downstream of the variant
+    (e.g., if a BP tool, offset refers to the number of the bp to extract up to the closest splicing acceptor).
+        seq_size (int): Length of the sequence to return. If `seq_size` is not provided, the sequence length is
+    calculated based on the offset and the length of the reference allele.
+    """
+        
+    del_size = len(record.REF) - len(record.ALT[0])
+
+    if del_size > max_del_size:
+        return None, None
+
+    if seq_size is None:
+        seq_size_wt = len(record.REF) + (offset * 2)
+        seq_size_mut = len(record.ALT) + (offset * 2)
+        span_del = len(record.REF) - 1
+    else:
+        seq_size_wt = seq_size
+        seq_size_mut = seq_size
+        span_del = 0
+        
+    if strand == "1":
+        seq_down_wt = str(fasta[record.CHROM][record.POS - 1: record.POS + span_del + abs(offset)])
+        seq_down_mut = seq_down_wt[del_size:]
+
+        bp_ups_wt = seq_size_wt - len(seq_down_wt)
+        bp_ups_mut = seq_size_mut - len(seq_down_mut)
+
+        seq_upst_wt = str(
+            fasta[record.CHROM][record.POS - 1 - bp_ups_wt : record.POS - 1]
+        )
+        seq_upst_mut = str(
+            fasta[record.CHROM][record.POS - 1 - bp_ups_mut : record.POS - 1]
+        )
+
+    elif strand == "-1":
+        seq_down_wt = str(
+            -fasta[record.CHROM][
+                record.POS - abs(offset) + del_size : record.POS + del_size
+            ]
+        )
+        seq_down_mut = seq_down_wt[del_size:]
+
+        bp_ups_wt = seq_size_wt - len(seq_down_wt)
+        bp_ups_mut = seq_size_mut - len(seq_down_mut)
+
+        seq_upst_wt = str(
+            -fasta[record.CHROM][
+                record.POS + del_size : record.POS + del_size + bp_ups_wt
+            ]
+        )
+        seq_upst_mut = str(
+            -fasta[record.CHROM][
+                record.POS + del_size : record.POS + del_size + bp_ups_mut
+            ]
+        )
+        
+    return seq_upst_wt + seq_down_wt, seq_upst_mut + seq_down_mut
 
 
 class DataProcessing(object):
@@ -229,19 +368,22 @@ class DataProcessing(object):
             for v_id, seq_mut_pos in hexplorer_mapping.items():
                 f.write("{}\t{}\n".format(v_id, seq_mut_pos))
             f.close()
-            f = open("{}_HEXplorer_input.txt".format(self.outbasename), "w")
-            f.write(
-                ">seqs_{}\n{}\n{}".format(
-                    self.outbasename, hexplorer_ref, hexplorer_mut
+            for group in ['ref', 'mut']:
+                seq = hexplorer_ref if group == 'ref' else hexplorer_mut
+                f = open("{}_HEXplorer_{}.fa".format(self.outbasename, group), "w")
+                f.write(
+                    ">seqs_{}_{}\n{}\n".format(
+                        self.outbasename, group, seq
+                    )
                 )
-            )
-            f.close()
-
+                f.close()
+    
         if self.surrounding is not None:
             _dict_to_fasta(
-                fasta_surrounding, "{}_surrounding_{}bp.fa".format(self.outbasename, self.surrounding)
+                fasta_surrounding,
+                "{}_surrounding_{}bp.fa".format(self.outbasename, self.surrounding),
             )
-            
+
     def extract_surrounding(
         self, record: cyvcf2.Variant, vep_annotation: str, out_dict: dict
     ):
@@ -250,6 +392,7 @@ class DataProcessing(object):
         with the variant located in the middle position.
         """
 
+        strand = vep_annotation.split("|")[self.vep_indexes["strand"]]
         id = (
             record.CHROM
             + "_"
@@ -258,50 +401,43 @@ class DataProcessing(object):
             + record.REF
             + "_"
             + record.ALT[0]
+            + "_{}".format('rev' if strand == '-1' else 'fwd')
         )
         header_wt = id + "_WT"
         header_mut = id + "_Mutated"
-        strand = vep_annotation.split("|")[self.vep_indexes["strand"]]
-        if record.var_type in ["snp"]:
-            if strand == "1":
-                seq_wt = str(
-                    self.fasta[record.CHROM][
-                        record.POS
-                        - self.surrounding
-                        - 1 : record.POS
-                        + self.surrounding
-                    ]
-                )
-                seq_mut = (
-                    seq_wt[: self.surrounding]
-                    + record.ALT[0]
-                    + seq_wt[self.surrounding + 1 :]
-                )
 
-            elif strand == "-1":
-                seq_wt = str(
-                    -self.fasta[record.CHROM][
-                        record.POS
-                        - self.surrounding
-                        - 1 : record.POS
-                        + self.surrounding
-                    ]
-                )
-                seq_mut = (
-                    seq_wt[: self.surrounding]
-                    + str(Seq(record.ALT[0]).complement())
-                    + seq_wt[self.surrounding + 1 :]
-                )
-
+        if record.var_type in ["snp", "mnp"]:
+            seq_wt, seq_mut = _process_snv_mnp(
+                record=record, strand=strand, fasta=self.fasta, offset=self.surrounding
+            )
             out_dict[header_wt] = seq_wt
             out_dict[header_mut] = seq_mut
+            
+        elif record.var_subtype == "del":
+            
+            if len(record.ALT[0]) != 1:
+                logging.info("[Surrounding] Variant {} discarded. Reason: Not a pure deletion: length of alternate allele is not 1.".format(id))
+            else:
+                seq_wt, seq_mut = _process_deletion(
+                    record=record, strand=strand, fasta=self.fasta, offset=self.surrounding
+                )
+                if all(x is None for x in [seq_wt, seq_mut]):
+                    logging.info(
+                        "[Surrounding] Variant {} discarded. Reason: Deletion larger than max allowed (10).".format(
+                            id
+                        )
+                    )
+                else:
+                    out_dict[header_wt] = seq_wt
+                    out_dict[header_mut] = seq_mut
 
         else:
             logging.info(
-                "[Surrounding] Variant {} discarded. Reason: There is only support for SNVs".format(
+                "[Surrounding] Variant {} discarded. Reason: There is only support for SNVs, MNPs and Deletions (up to 10bp)".format(
                     id
                 )
             )
+
         return out_dict
 
     def ESRseq(self, record: cyvcf2.Variant, vep_annotation: str, out_dict: dict):
@@ -309,6 +445,7 @@ class DataProcessing(object):
         11bp sequences will be generated with each
         variant being located in the middle position (6).
         """
+        strand = vep_annotation.split("|")[self.vep_indexes["strand"]]
         id = (
             record.CHROM
             + "_"
@@ -316,11 +453,12 @@ class DataProcessing(object):
             + "_"
             + record.REF
             + "_"
-            + record.ALT[0]
+            + record.ALT[0]     
+            + "_{}".format('rev' if strand == '-1' else 'fwd')
+        
         )
         header_wt = id + "_WT"
         header_mut = id + "_Mutated"
-        strand = vep_annotation.split("|")[self.vep_indexes["strand"]]
         if record.var_type in ["snp"]:
             if strand == "1":
                 seq_wt = str(self.fasta[record.CHROM][record.POS - 6 : record.POS + 5])
@@ -335,7 +473,7 @@ class DataProcessing(object):
 
         else:
             logging.info(
-                "[ESRseq] Variant {} discarded. Reason: There is only support for SNVs".format(
+                "[ESRseq] Variant {} discarded. Reason: There is only support for SNVs for non-BP tools".format(
                     id
                 )
             )
@@ -346,6 +484,7 @@ class DataProcessing(object):
         21bp sequences will be generated with each
         variant being located in the middle position (61).
         """
+        strand = vep_annotation.split("|")[self.vep_indexes["strand"]]
         id = (
             record.CHROM
             + "_"
@@ -353,11 +492,11 @@ class DataProcessing(object):
             + "_"
             + record.REF
             + "_"
-            + record.ALT[0]
+            + record.ALT[0] 
+            + "_{}".format('rev' if strand == '-1' else 'fwd')
         )
         header_wt = id + "_WT"
         header_mut = id + "_Mutated"
-        strand = vep_annotation.split("|")[self.vep_indexes["strand"]]
         if record.var_type in ["snp"]:
             if strand == "1":
                 seq_wt = str(
@@ -378,7 +517,7 @@ class DataProcessing(object):
 
         else:
             logging.info(
-                "[ESEfinder] Variant {} discarded. Reason: There is only support for SNVs".format(
+                "[ESEfinder] Variant {} discarded. Reason: There is only support for SNVs for non-BP tools".format(
                     id
                 )
             )
@@ -393,9 +532,10 @@ class DataProcessing(object):
         hexplorer_mut_seq: str,
     ):
         """
-        121bp sequences will be generated with each
-        variant being located in the middle position (61).
+        11bp sequences will be generated with each
+        variant being located in the middle position (index 5).
         """
+        strand = vep_annotation.split("|")[self.vep_indexes["strand"]]
         id = (
             record.CHROM
             + "_"
@@ -404,28 +544,28 @@ class DataProcessing(object):
             + record.REF
             + "_"
             + record.ALT[0]
+            + "_{}".format('rev' if strand == '-1' else 'fwd')
         )
 
-        strand = vep_annotation.split("|")[self.vep_indexes["strand"]]
         if record.var_type in ["snp"]:
             if strand == "1":
                 seq_wt = str(
-                    self.fasta[record.CHROM][record.POS - 61 : record.POS + 60]
+                    self.fasta[record.CHROM][record.POS - 11 : record.POS + 10]
                 )
-                seq_mut = seq_wt[:60] + record.ALT[0] + seq_wt[61:]
+                seq_mut = seq_wt[:10] + record.ALT[0] + seq_wt[11:]
 
             elif strand == "-1":
                 seq_wt = str(
-                    -self.fasta[record.CHROM][record.POS - 61 : record.POS + 60]
+                    -self.fasta[record.CHROM][record.POS - 11 : record.POS + 10]
                 )
                 seq_mut = (
-                    seq_wt[:60] + str(Seq(record.ALT[0]).complement()) + seq_wt[61:]
+                    seq_wt[:10] + str(Seq(record.ALT[0]).complement()) + seq_wt[11:]
                 )
 
             if len(variant_seq_map) >= 1:
-                variant_seq_map[id] = 121 * len(variant_seq_map) + 121 - 61
+                variant_seq_map[id] = 21 * len(variant_seq_map) + 21 - 11
             else:
-                variant_seq_map[id] = 60
+                variant_seq_map[id] = 10
 
             hexplorer_ref_seq += seq_wt
             hexplorer_mut_seq += seq_mut
@@ -434,7 +574,7 @@ class DataProcessing(object):
 
         else:
             logging.info(
-                "[HEXplorer] Variant {} discarded. Reason: There is only support for SNVs".format(
+                "[HEXplorer] Variant {} discarded. Reason: There is only support for SNVs for non-BP tools".format(
                     id
                 )
             )
@@ -448,7 +588,8 @@ class DataProcessing(object):
         assert self.ss in [
             "donor",
             "acceptor",
-        ], "--splicerover requires --splice_site to be set (donor or acceptor)"
+        ], "--splicerover requires --ss to be set (donor or acceptor)"
+        strand = vep_annotation.split("|")[self.vep_indexes["strand"]]
         id = (
             record.CHROM
             + "_"
@@ -457,10 +598,10 @@ class DataProcessing(object):
             + record.REF
             + "_"
             + record.ALT[0]
+            + "_{}".format('rev' if strand == '-1' else 'fwd')
         )
         header_wt = id + "_WT"
         header_mut = id + "_Mutated"
-        strand = vep_annotation.split("|")[self.vep_indexes["strand"]]
 
         if record.var_type in ["snp"]:
             if strand == "1":
@@ -497,7 +638,7 @@ class DataProcessing(object):
 
         else:
             logging.info(
-                "[SpliceRover {}] Variant {} discarded. Reason: There is only support for SNVs".format(
+                "[SpliceRover {}] Variant {} discarded. Reason: There is only support for SNVs for non-BP tools".format(
                     self.ss, id
                 )
             )
@@ -508,11 +649,12 @@ class DataProcessing(object):
         200bp sequences will be generated with the putative
         splice sites around the middle positions (101,102).
         """
-
+     
         assert self.ss in [
             "donor",
             "acceptor",
-        ], "--spliceator requires --splice_site to be set (donor or acceptor)"
+        ], "--spliceator requires --ss to be set (donor or acceptor)"
+        strand = vep_annotation.split("|")[self.vep_indexes["strand"]]
         id = (
             record.CHROM
             + "_"
@@ -521,10 +663,10 @@ class DataProcessing(object):
             + record.REF
             + "_"
             + record.ALT[0]
+            + "_{}".format('rev' if strand == '-1' else 'fwd')
         )
         header_wt = id + "_WT"
         header_mut = id + "_Mutated"
-        strand = vep_annotation.split("|")[self.vep_indexes["strand"]]
 
         if record.var_type in ["snp"]:
             if strand == "1":
@@ -561,7 +703,7 @@ class DataProcessing(object):
 
         else:
             logging.info(
-                "[Spliceator {}] Variant {} discarded. Reason: There is only support for SNVs".format(
+                "[Spliceator {}] Variant {} discarded. Reason: There is only support for SNVs for non-BP tools".format(
                     self.ss, id
                 )
             )
@@ -576,7 +718,8 @@ class DataProcessing(object):
         assert self.ss in [
             "donor",
             "acceptor",
-        ], "--dssp requires --splice_site to be set (donor or acceptor)"
+        ], "--dssp requires --ss to be set (donor or acceptor)"
+        strand = vep_annotation.split("|")[self.vep_indexes["strand"]]
         id = (
             record.CHROM
             + "_"
@@ -585,10 +728,10 @@ class DataProcessing(object):
             + record.REF
             + "_"
             + record.ALT[0]
+            + "_{}".format('rev' if strand == '-1' else 'fwd')
         )
         header_wt = id + "_WT"
         header_mut = id + "_Mutated"
-        strand = vep_annotation.split("|")[self.vep_indexes["strand"]]
         hgvs = vep_annotation.split("|")[self.vep_indexes["hgvsc"]]
 
         if record.var_type in ["snp"]:
@@ -660,7 +803,7 @@ class DataProcessing(object):
 
         else:
             logging.info(
-                "[Splice2Deep {}] Variant {} discarded. Reason: There is only support for SNVs".format(
+                "[Splice2Deep {}] Variant {} discarded. Reason: There is only support for SNVs for non-BP tools".format(
                     self.ss, id
                 )
             )
@@ -672,6 +815,7 @@ class DataProcessing(object):
             "acceptor",
         ], "--splice2deep requires --ss to be set (donor or acceptor)"
 
+        strand = vep_annotation.split("|")[self.vep_indexes["strand"]]
         id = (
             record.CHROM
             + "_"
@@ -680,10 +824,10 @@ class DataProcessing(object):
             + record.REF
             + "_"
             + record.ALT[0]
+            + "_{}".format('rev' if strand == '-1' else 'fwd')
         )
         header_wt = id + "_WT"
         header_mut = id + "_Mutated"
-        strand = vep_annotation.split("|")[self.vep_indexes["strand"]]
         hgvs = vep_annotation.split("|")[self.vep_indexes["hgvsc"]]
 
         if record.var_type in ["snp"]:
@@ -747,7 +891,7 @@ class DataProcessing(object):
 
         else:
             logging.info(
-                "[Splice2Deep {}] Variant {} discarded. Reason: There is only support for SNVs".format(
+                "[Splice2Deep {}] Variant {} discarded. Reason: There is only support for SNVs for non-BP tools".format(
                     self.ss, id
                 )
             )
@@ -761,8 +905,9 @@ class DataProcessing(object):
         assert self.ss in [
             "donor",
             "acceptor",
-        ], "--maxentscan requires --splice_site to be set (donor or acceptor)"
+        ], "--maxentscan requires --ss to be set (donor or acceptor)"
 
+        strand = vep_annotation.split("|")[self.vep_indexes["strand"]]
         id = (
             record.CHROM
             + "_"
@@ -771,10 +916,10 @@ class DataProcessing(object):
             + record.REF
             + "_"
             + record.ALT[0]
+            + "_{}".format('rev' if strand == '-1' else 'fwd')
         )
         header_wt = id + "_WT"
         header_mut = id + "_Mutated"
-        strand = vep_annotation.split("|")[self.vep_indexes["strand"]]
         context = 8 if self.ss == "donor" else 22
         if record.var_type in ["snp"]:
             if strand == "1":
@@ -801,7 +946,7 @@ class DataProcessing(object):
 
         else:
             logging.info(
-                "[MaxEntScan {}] Variant {} discarded. Reason: There is only support for SNVs".format(
+                "[MaxEntScan {}] Variant {} discarded. Reason: There is only support for SNVs for non-BP tools".format(
                     self.ss, id
                 )
             )
@@ -816,7 +961,7 @@ class DataProcessing(object):
         seq_size: str = 500,
     ):
         hgvs = vep_annotation.split("|")[self.vep_indexes["hgvsc"]]
-
+        strand = vep_annotation.split("|")[self.vep_indexes["strand"]]
         v = self.hp.parse_hgvs_variant(hgvs.split(" ")[0])
 
         id = (
@@ -827,6 +972,7 @@ class DataProcessing(object):
             + record.REF
             + "_"
             + record.ALT[0]
+            + "_{}".format('rev' if strand == '-1' else 'fwd')
         )
         offset = v.posedit.pos.start.offset
 
@@ -854,102 +1000,28 @@ class DataProcessing(object):
         else:
             header_wt = id + "_WT"
             header_mut = id + "_Mutated"
-            strand = vep_annotation.split("|")[self.vep_indexes["strand"]]
 
             if record.var_type in ["snp", "mnp"]:
-                if strand == "1":
-                    adjust_offset = 0 if record.var_type == "mnp" else -1
-                    seq_down_wt = str(
-                        self.fasta[record.CHROM][
-                            record.POS - 1 : record.POS + abs(offset) + adjust_offset
-                        ]
-                    )
-                    seq_down_mut = record.ALT[0] + seq_down_wt[len(record.REF) :]
-
-                    bp_ups_wt = seq_size - len(seq_down_wt)
-                    seq_upst = str(
-                        self.fasta[record.CHROM][
-                            record.POS - 1 - bp_ups_wt : record.POS - 1
-                        ]
-                    )
-
-                elif strand == "-1":
-                    seq_down_wt = str(
-                        -self.fasta[record.CHROM][
-                            record.POS
-                            - abs(offset)
-                            + len(record.REF)
-                            - 1 : record.POS
-                            + len(record.REF)
-                            - 1
-                        ]
-                    )
-                    seq_down_mut = (
-                        str(Seq(record.ALT[0]).reverse_complement())
-                        + seq_down_wt[len(record.REF) :]
-                    )
-
-                    bp_ups_wt = seq_size - len(seq_down_wt)
-                    seq_upst = str(
-                        -self.fasta[record.CHROM][
-                            record.POS
-                            + len(record.REF)
-                            - 1 : record.POS
-                            + bp_ups_wt
-                            + len(record.REF)
-                            - 1
-                        ]
-                    )
-
-                out_dict[header_wt] = seq_upst + seq_down_wt
-                out_dict[header_mut] = seq_upst + seq_down_mut
+                seq_wt, seq_mut = _process_snv_mnp(record, strand, self.fasta, offset, seq_size)
+                out_dict[header_wt] = seq_wt
+                out_dict[header_mut] = seq_mut
 
             elif record.var_subtype == "del":
-                del_size = len(record.REF) - len(record.ALT[0])
-                if strand == "1":
-                    seq_down_wt = str(
-                        self.fasta[record.CHROM][record.POS : record.POS + abs(offset)]
+                if len(record.ALT[0]) != 1:
+                    logging.info("[{}] Variant {} discarded. Reason: Not a pure deletion: length of alternate allele is not 1.".format(tool, id))
+                else:
+                    seq_wt, seq_mut = _process_deletion(
+                        record, strand, self.fasta, offset, seq_size
                     )
-                    seq_down_mut = seq_down_wt[del_size:]
-
-                    bp_ups_wt = seq_size - len(seq_down_wt)
-                    bp_ups_mut = seq_size - len(seq_down_mut)
-
-                    seq_upst_wt = str(
-                        self.fasta[record.CHROM][
-                            record.POS - 1 - bp_ups_wt : record.POS - 1
-                        ]
+                    if all(x is None for x in [seq_wt, seq_mut]):
+                        logging.info(
+                        "[{}] Variant {} discarded. Reason: Deletion larger than max allowed (10).".format(tool,
+                            id
+                        )
                     )
-                    seq_upst_mut = str(
-                        self.fasta[record.CHROM][
-                            record.POS - 1 - bp_ups_mut : record.POS - 1
-                        ]
-                    )
-
-                elif strand == "-1":
-                    seq_down_wt = str(
-                        -self.fasta[record.CHROM][
-                            record.POS - abs(offset) + del_size : record.POS + del_size
-                        ]
-                    )
-                    seq_down_mut = seq_down_wt[del_size:]
-
-                    bp_ups_wt = seq_size - len(seq_down_wt)
-                    bp_ups_mut = seq_size - len(seq_down_mut)
-
-                    seq_upst_wt = str(
-                        -self.fasta[record.CHROM][
-                            record.POS + del_size : record.POS + del_size + bp_ups_wt
-                        ]
-                    )
-                    seq_upst_mut = str(
-                        -self.fasta[record.CHROM][
-                            record.POS + del_size : record.POS + del_size + bp_ups_mut
-                        ]
-                    )
-
-                out_dict[header_wt] = seq_upst_wt + seq_down_wt
-                out_dict[header_mut] = seq_upst_mut + seq_down_mut
+                    else:
+                        out_dict[header_wt] = seq_wt
+                        out_dict[header_mut] = seq_mut
 
             else:
                 raise ValueError("Not seen case")
@@ -1001,7 +1073,7 @@ def main():
     parser.add_argument(
         "--bpp",
         action="store_true",
-        help="Generate input for BPP (200bp upstream of acceptor site). Only sequences that refer to the end of introns will be written",
+        help="Generate input for BPP (500bp upstream of acceptor site). Only sequences that refer to the end of introns will be written",
     )
     parser.add_argument(
         "--maxentscan",
@@ -1031,7 +1103,7 @@ def main():
     parser.add_argument(
         "--hexplorer",
         action="store_true",
-        help="Generate input for HEXplorer web tool. Sequences of 121bp for each mutation will be generated (mutation at pos 61).",
+        help="Generate input for HEXplorer web tool. Sequences of 21bp for each mutation will be generated (mutation at pos 11).",
     )
     parser.add_argument(
         "--esefinder",

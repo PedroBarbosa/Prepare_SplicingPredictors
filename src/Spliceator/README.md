@@ -4,7 +4,7 @@ Step to generate Spliceator finder results:
 `vcf2seq infile_donors.vcf.gz hg19_genome.fa out --spliceator --ss donor`\
 `vcf2seq infile_acceptors.vcf.gz hg19_genome.fa out --spliceator --ss acceptor`
 
-- Clone the [official repo](https://git.unistra.fr/nscalzitti/spliceator), make sure the dependecnies are installed, and run the model by generating predictions for all positions in the input sequence:\
+- Clone the [official repo](https://git.unistra.fr/nscalzitti/spliceator), make sure the dependencies are installed, and run the model by generating predictions for all positions in the input sequence:\
 `./Spliceator --all True -f Spliceator_donor.fa -o spliceator_donor_out.csv`\
 `./Spliceator --all True -f Spliceator_acceptor.fa -o spliceator_acceptor_out.csv`
 
