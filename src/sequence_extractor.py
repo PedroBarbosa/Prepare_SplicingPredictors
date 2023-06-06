@@ -364,19 +364,39 @@ class DataProcessing(object):
             _dict_to_fasta(fasta_esrseq, "{}_ESRseq.fa".format(self.outbasename))
 
         if self.hexplorer:
-            f = open("{}_HEXplorer_map.tsv".format(self.outbasename), "w")
-            for v_id, seq_mut_pos in hexplorer_mapping.items():
-                f.write("{}\t{}\n".format(v_id, seq_mut_pos))
-            f.close()
-            for group in ['ref', 'mut']:
-                seq = hexplorer_ref if group == 'ref' else hexplorer_mut
-                f = open("{}_HEXplorer_{}.fa".format(self.outbasename, group), "w")
-                f.write(
-                    ">seqs_{}_{}\n{}\n".format(
-                        self.outbasename, group, seq
-                    )
+            if len(hexplorer_mapping) > 50:
+                items = list(hexplorer_mapping.items())
+                num_items = len(items)
+                for i in range(0, num_items, 50):
+                    batch = items[i:i+50]
+                    d = dict(batch)
+                    f = open("{}_HEXplorer_map_{}_{}.tsv".format(self.outbasename, i, i + len(d)), "w")
+                    for v_id, seq_mut_pos in d.items():
+                        f.write("{}\t{}\n".format(v_id, seq_mut_pos - i * 21))
+                    
+                    for group in ['ref', 'mut']:
+                        seq = hexplorer_ref if group == 'ref' else hexplorer_mut
+                        start = i * 21
+                        end = start + len(d) * 21
+                        _seq = seq[start:end]
+                        f = open("{}_HEXplorer_{}_{}_{}.fa".format(self.outbasename, group, i, i + len(d)), "w")
+                        f.write(">seqs_{}_{}\n{}\n".format(self.outbasename, group, _seq)
                 )
+
+            else:
+                f = open("{}_HEXplorer_map.tsv".format(self.outbasename), "w")
+                for v_id, seq_mut_pos in hexplorer_mapping.items():
+                    f.write("{}\t{}\n".format(v_id, seq_mut_pos))
                 f.close()
+                for group in ['ref', 'mut']:
+                    seq = hexplorer_ref if group == 'ref' else hexplorer_mut
+                    f = open("{}_HEXplorer_{}.fa".format(self.outbasename, group), "w")
+                    f.write(
+                        ">seqs_{}_{}\n{}\n".format(
+                            self.outbasename, group, seq
+                        )
+                    )
+                    f.close()
     
         if self.surrounding is not None:
             _dict_to_fasta(
@@ -473,7 +493,7 @@ class DataProcessing(object):
 
         else:
             logging.info(
-                "[ESRseq] Variant {} discarded. Reason: There is only support for SNVs for non-BP tools".format(
+                "[ESRseq] Variant {} discarded. Reason: There is only support for SNVs.".format(
                     id
                 )
             )
@@ -482,7 +502,7 @@ class DataProcessing(object):
     def ESEfinder(self, record: cyvcf2.Variant, vep_annotation: str, out_dict: dict):
         """
         21bp sequences will be generated with each
-        variant being located in the middle position (61).
+        variant being located in the middle position (10).
         """
         strand = vep_annotation.split("|")[self.vep_indexes["strand"]]
         id = (
@@ -517,7 +537,7 @@ class DataProcessing(object):
 
         else:
             logging.info(
-                "[ESEfinder] Variant {} discarded. Reason: There is only support for SNVs for non-BP tools".format(
+                "[ESEfinder] Variant {} discarded. Reason: There is only support for SNVs.".format(
                     id
                 )
             )
@@ -574,7 +594,7 @@ class DataProcessing(object):
 
         else:
             logging.info(
-                "[HEXplorer] Variant {} discarded. Reason: There is only support for SNVs for non-BP tools".format(
+                "[HEXplorer] Variant {} discarded. Reason: There is only support for SNVs.".format(
                     id
                 )
             )
@@ -638,7 +658,7 @@ class DataProcessing(object):
 
         else:
             logging.info(
-                "[SpliceRover {}] Variant {} discarded. Reason: There is only support for SNVs for non-BP tools".format(
+                "[SpliceRover {}] Variant {} discarded. Reason: There is only support for SNVs.".format(
                     self.ss, id
                 )
             )
@@ -703,7 +723,7 @@ class DataProcessing(object):
 
         else:
             logging.info(
-                "[Spliceator {}] Variant {} discarded. Reason: There is only support for SNVs for non-BP tools".format(
+                "[Spliceator {}] Variant {} discarded. Reason: There is only support for SNVs.".format(
                     self.ss, id
                 )
             )
@@ -803,7 +823,7 @@ class DataProcessing(object):
 
         else:
             logging.info(
-                "[Splice2Deep {}] Variant {} discarded. Reason: There is only support for SNVs for non-BP tools".format(
+                "[Splice2Deep {}] Variant {} discarded. Reason: There is only support for SNVs.".format(
                     self.ss, id
                 )
             )
@@ -891,7 +911,7 @@ class DataProcessing(object):
 
         else:
             logging.info(
-                "[Splice2Deep {}] Variant {} discarded. Reason: There is only support for SNVs for non-BP tools".format(
+                "[Splice2Deep {}] Variant {} discarded. Reason: There is only support for SNVs.".format(
                     self.ss, id
                 )
             )
@@ -946,7 +966,7 @@ class DataProcessing(object):
 
         else:
             logging.info(
-                "[MaxEntScan {}] Variant {} discarded. Reason: There is only support for SNVs for non-BP tools".format(
+                "[MaxEntScan {}] Variant {} discarded. Reason: There is only support for SNVs.".format(
                     self.ss, id
                 )
             )

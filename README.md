@@ -50,4 +50,4 @@ Note: Do not change the fasta headers of the generated sequences, since the `get
 * [BPHunter](https://www.pnas.org/doi/10.1073/pnas.2211194119)
   
 ### Limitations
-Only single-nucleotide variants (SNVs) are supported.
+For most models, only single-nucleotide variants (SNVs) are supported.
