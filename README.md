@@ -51,3 +51,6 @@ Note: Do not change the fasta headers of the generated sequences, since the `get
   
 ### Limitations
 For most models, only single-nucleotide variants (SNVs) are supported.
+
+### Contact
+pbarbosa@lasige.di.fc.ul.pt
